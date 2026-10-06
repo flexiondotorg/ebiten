@@ -854,7 +854,12 @@ func appendUniformVariables(values []uint32, uniformTypes []shaderir.Type, unifo
 	// Each type's alignment is defined by the specification.
 	// See https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf
 
+	// Metal rounds the size of the struct up to the largest alignment of its members, so the data
+	// must end on that alignment too. Otherwise a struct that ends off a 16-byte boundary, like
+	// vec4 then float, is 4 bytes short, which Metal API validation rejects.
+	structAlign := 1
 	fillZerosToFitAlignment := func(values []uint32, align int) []uint32 {
+		structAlign = max(structAlign, align)
 		if len(values) == 0 {
 			return values
 		}
@@ -973,5 +978,5 @@ func appendUniformVariables(values []uint32, uniformTypes []shaderir.Type, unifo
 		}
 	}
 
-	return values
+	return fillZerosToFitAlignment(values, structAlign)
 }

@@ -70,3 +70,62 @@ func TestAppendUniformVariablesShaderSwitch(t *testing.T) {
 		}
 	}
 }
+
+func TestAppendUniformVariablesStructPadding(t *testing.T) {
+	cases := []struct {
+		name        string
+		types       []shaderir.Type
+		input, want []uint32
+	}{
+		{
+			name:  "float",
+			types: []shaderir.Type{{Main: shaderir.Float}},
+			input: []uint32{1},
+			want:  []uint32{1},
+		},
+		{
+			name:  "float then vec2",
+			types: []shaderir.Type{{Main: shaderir.Float}, {Main: shaderir.Vec2}},
+			input: []uint32{1, 2, 3},
+			want:  []uint32{1, 0, 2, 3},
+		},
+		{
+			// The struct is 32 bytes, but the data ended after 20 (#TODO).
+			name:  "vec4 then float",
+			types: []shaderir.Type{{Main: shaderir.Vec4}, {Main: shaderir.Float}},
+			input: []uint32{1, 2, 3, 4, 5},
+			want:  []uint32{1, 2, 3, 4, 5, 0, 0, 0},
+		},
+		{
+			name:  "vec3",
+			types: []shaderir.Type{{Main: shaderir.Vec3}},
+			input: []uint32{1, 2, 3},
+			want:  []uint32{1, 2, 3, 0},
+		},
+		{
+			name:  "vec2 array then float",
+			types: []shaderir.Type{arrayType(shaderir.Vec2, 4), {Main: shaderir.Float}},
+			input: sequence(9),
+			want:  []uint32{1, 2, 3, 4, 5, 6, 7, 8, 9, 0},
+		},
+		{
+			name:  "mat4 then vec2",
+			types: []shaderir.Type{{Main: shaderir.Mat4}, {Main: shaderir.Vec2}},
+			input: sequence(18),
+			want:  []uint32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 0, 0},
+		},
+		{
+			name:  "two bools in one word",
+			types: []shaderir.Type{{Main: shaderir.Bool}, {Main: shaderir.Bool}},
+			input: []uint32{1, 1},
+			want:  []uint32{0x101},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := metal.AppendUniformVariables(nil, c.types, c.input); !slices.Equal(got, c.want) {
+				t.Errorf("packed = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
