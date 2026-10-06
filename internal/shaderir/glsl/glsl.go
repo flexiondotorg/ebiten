@@ -100,6 +100,26 @@ type compileContext struct {
 	structNames        map[string]string
 	structTypes        []shaderir.Type
 	assignedAttributes []bool
+
+	// mediump is true while the function of a //kage:precision mediump directive is written.
+	mediump bool
+}
+
+// precision returns the qualifier of a float parameter, return value, or local variable of type t.
+// Desktop GLSL accepts the qualifier and ignores it.
+func (c *compileContext) precision(t *shaderir.Type) string {
+	if !c.mediump {
+		return ""
+	}
+	m := t.Main
+	if m == shaderir.Array {
+		m = t.Sub[0].Main
+	}
+	switch m {
+	case shaderir.Float, shaderir.Vec2, shaderir.Vec3, shaderir.Vec4, shaderir.Mat2, shaderir.Mat3, shaderir.Mat4:
+		return "mediump "
+	}
+	return ""
 }
 
 func (c *compileContext) structName(p *shaderir.Program, t *shaderir.Type) string {
@@ -351,14 +371,17 @@ func (c *compileContext) varInit(p *shaderir.Program, t *shaderir.Type) string {
 }
 
 func (c *compileContext) function(p *shaderir.Program, f *shaderir.Func, prototype bool) []string {
+	c.mediump = f.Mediump
+	defer func() { c.mediump = false }()
+
 	var args []string
 	var idx int
 	for _, t := range f.InParams {
-		args = append(args, "in "+c.varDecl(p, &t, fmt.Sprintf("l%d", idx)))
+		args = append(args, "in "+c.precision(&t)+c.varDecl(p, &t, fmt.Sprintf("l%d", idx)))
 		idx++
 	}
 	for _, t := range f.OutParams {
-		args = append(args, "out "+c.varDecl(p, &t, fmt.Sprintf("l%d", idx)))
+		args = append(args, "out "+c.precision(&t)+c.varDecl(p, &t, fmt.Sprintf("l%d", idx)))
 		idx++
 	}
 	argsstr := "void"
@@ -367,7 +390,7 @@ func (c *compileContext) function(p *shaderir.Program, f *shaderir.Func, prototy
 	}
 
 	t0, t1 := c.typ(p, &f.Return)
-	sig := fmt.Sprintf("%s%s F%d(%s)", t0, t1, f.Index, argsstr)
+	sig := fmt.Sprintf("%s%s%s F%d(%s)", c.precision(&f.Return), t0, t1, f.Index, argsstr)
 
 	var lines []string
 	if prototype {
@@ -449,7 +472,7 @@ func (c *compileContext) initVariable(p *shaderir.Program, topBlock, block *shad
 	switch t.Main {
 	case shaderir.Array:
 		if decl {
-			lines = append(lines, fmt.Sprintf("%s%s;", idt, c.varDecl(p, &t, name)))
+			lines = append(lines, fmt.Sprintf("%s%s%s;", idt, c.precision(&t), c.varDecl(p, &t, name)))
 		}
 		init := c.varInit(p, &t.Sub[0])
 		for i := 0; i < t.Length; i++ {
@@ -459,7 +482,7 @@ func (c *compileContext) initVariable(p *shaderir.Program, topBlock, block *shad
 		// The type is None e.g., when the variable is a for-loop counter.
 	default:
 		if decl {
-			lines = append(lines, fmt.Sprintf("%s%s = %s;", idt, c.varDecl(p, &t, name), c.varInit(p, &t)))
+			lines = append(lines, fmt.Sprintf("%s%s%s = %s;", idt, c.precision(&t), c.varDecl(p, &t, name), c.varInit(p, &t)))
 		} else {
 			lines = append(lines, fmt.Sprintf("%s%s = %s;", idt, name, c.varInit(p, &t)))
 		}

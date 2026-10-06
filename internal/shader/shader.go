@@ -233,7 +233,7 @@ const (
 // lines between [InternalRegionBegin] and [InternalRegionEnd]. A source can have at most one internal region.
 func Compile(src []byte, vertexEntry, fragmentEntry string, textureCount int) (*shaderir.Program, error) {
 	fs := token.NewFileSet()
-	f, err := parser.ParseFile(fs, "", src, parser.AllErrors)
+	f, err := parser.ParseFile(fs, "", src, parser.AllErrors|parser.ParseComments)
 	if err != nil {
 		return nil, err
 	}
@@ -357,6 +357,26 @@ func (cs *compileState) checkPackageLevelNames(f *ast.File) bool {
 	return true
 }
 
+// parseFuncPrecision reports whether the doc comment of fd has the directive //kage:precision mediump.
+func (cs *compileState) parseFuncPrecision(fd *ast.FuncDecl) (bool, bool) {
+	if fd.Doc == nil {
+		return false, true
+	}
+	var mediump bool
+	for _, c := range fd.Doc.List {
+		v, ok := strings.CutPrefix(c.Text, "//kage:precision")
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(v) != "mediump" || mediump {
+			cs.addError(c.Pos(), fmt.Sprintf("invalid directive: %s", c.Text))
+			return false, false
+		}
+		mediump = true
+	}
+	return mediump, true
+}
+
 func (cs *compileState) parse(f *ast.File) {
 	for _, d := range f.Decls {
 		if d, ok := d.(*ast.FuncDecl); ok && d.Recv != nil {
@@ -415,6 +435,14 @@ func (cs *compileState) parse(f *ast.File) {
 		n := fd.Name.Name
 
 		inParams, outParams, ret := cs.parseFuncParams(&cs.global, n, fd)
+		mediump, ok := cs.parseFuncPrecision(fd)
+		if !ok {
+			return
+		}
+		if mediump && (n == cs.vertexEntry || n == cs.fragmentEntry) {
+			cs.addError(d.Pos(), fmt.Sprintf("//kage:precision is not allowed on the entry point %s", n))
+			return
+		}
 
 		if n == cs.vertexEntry {
 			cs.vertexEntryPos = d.Pos()
@@ -455,6 +483,7 @@ func (cs *compileState) parse(f *ast.File) {
 				OutParams: outT,
 				Return:    ret,
 				Block:     &shaderir.Block{},
+				Mediump:   mediump,
 			},
 		})
 	}
@@ -710,6 +739,7 @@ func (cs *compileState) parseDecl(b *block, fname string, d ast.Decl) ([]shaderi
 				if cs.funcs[i].pos == d.Pos() {
 					// Index is already determined by the provisional parsing.
 					f.ir.Index = cs.funcs[i].ir.Index
+					f.ir.Mediump = cs.funcs[i].ir.Mediump
 					cs.funcs[i] = f
 					break
 				}
