@@ -866,18 +866,59 @@ func (cb CommandBuffer) WaitUntilScheduled() {
 //
 // Reference: https://developer.apple.com/documentation/metal/mtlcommandbuffer/1442999-rendercommandencoderwithdescript?language=objc.
 func (cb CommandBuffer) RenderCommandEncoderWithDescriptor(rpd RenderPassDescriptor) (RenderCommandEncoder, error) {
-	var renderPassDescriptor = objc.ID(class_MTLRenderPassDescriptor).Send(sel_new)
-	var colorAttachments0 = renderPassDescriptor.Send(sel_colorAttachments).Send(sel_objectAtIndexedSubscript, 0)
-	colorAttachments0.Send(sel_setLoadAction, int(rpd.ColorAttachments[0].LoadAction))
-	colorAttachments0.Send(sel_setStoreAction, int(rpd.ColorAttachments[0].StoreAction))
-	colorAttachments0.Send(sel_setTexture, rpd.ColorAttachments[0].Texture.texture)
-	colorAttachments0.Send(sel_setClearColor, rpd.ColorAttachments[0].ClearColor)
-	var stencilAttachment = renderPassDescriptor.Send(sel_stencilAttachment)
-	stencilAttachment.Send(sel_setLoadAction, int(rpd.StencilAttachment.LoadAction))
-	stencilAttachment.Send(sel_setStoreAction, int(rpd.StencilAttachment.StoreAction))
-	stencilAttachment.Send(sel_setTexture, rpd.StencilAttachment.Texture.texture)
-	var rce = cb.commandBuffer.Send(sel_renderCommandEncoderWithDescriptor, renderPassDescriptor)
-	renderPassDescriptor.Send(sel_release)
+	var c RenderPassDescriptorCache
+	defer c.Release()
+	return cb.RenderCommandEncoderWithDescriptorCache(&c, rpd)
+}
+
+// RenderPassDescriptorCache keeps an MTLRenderPassDescriptor object to create render command
+// encoders, so that an encoder does not create a descriptor. A cache must be used on one thread at
+// a time.
+type RenderPassDescriptorCache struct {
+	descriptor        objc.ID
+	colorAttachment0  objc.ID
+	stencilAttachment objc.ID
+	clearColor        ClearColor
+}
+
+// Release releases the descriptor of the cache.
+func (c *RenderPassDescriptorCache) Release() {
+	if c.descriptor != 0 {
+		objcutil.Send(c.descriptor, sel_release)
+	}
+	*c = RenderPassDescriptorCache{}
+}
+
+// RenderCommandEncoderWithDescriptorCache is like RenderCommandEncoderWithDescriptor, with a
+// descriptor from c. Metal copies the state of the descriptor when it creates the encoder, so the
+// next encoder can change it.
+func (cb CommandBuffer) RenderCommandEncoderWithDescriptorCache(c *RenderPassDescriptorCache, rpd RenderPassDescriptor) (RenderCommandEncoder, error) {
+	if c.descriptor == 0 {
+		c.descriptor = objc.ID(class_MTLRenderPassDescriptor).Send(sel_new)
+		c.colorAttachment0 = c.descriptor.Send(sel_colorAttachments).Send(sel_objectAtIndexedSubscript, 0)
+		c.stencilAttachment = c.descriptor.Send(sel_stencilAttachment)
+		c.colorAttachment0.Send(sel_setClearColor, rpd.ColorAttachments[0].ClearColor)
+		c.clearColor = rpd.ColorAttachments[0].ClearColor
+	}
+
+	// MTLClearColor is 4 doubles, which travel in the floating-point registers, so objcutil cannot
+	// send it. Set it only when it changes.
+	if c.clearColor != rpd.ColorAttachments[0].ClearColor {
+		c.colorAttachment0.Send(sel_setClearColor, rpd.ColorAttachments[0].ClearColor)
+		c.clearColor = rpd.ColorAttachments[0].ClearColor
+	}
+	objcutil.Send(c.colorAttachment0, sel_setLoadAction, uintptr(rpd.ColorAttachments[0].LoadAction))
+	objcutil.Send(c.colorAttachment0, sel_setStoreAction, uintptr(rpd.ColorAttachments[0].StoreAction))
+	objcutil.Send(c.colorAttachment0, sel_setTexture, uintptr(rpd.ColorAttachments[0].Texture.texture))
+	objcutil.Send(c.stencilAttachment, sel_setLoadAction, uintptr(rpd.StencilAttachment.LoadAction))
+	objcutil.Send(c.stencilAttachment, sel_setStoreAction, uintptr(rpd.StencilAttachment.StoreAction))
+	objcutil.Send(c.stencilAttachment, sel_setTexture, uintptr(rpd.StencilAttachment.Texture.texture))
+	rce := objc.ID(objcutil.Send(cb.commandBuffer, sel_renderCommandEncoderWithDescriptor, uintptr(c.descriptor)))
+
+	// Do not keep the textures, for example a drawable, alive in the descriptor.
+	objcutil.Send(c.colorAttachment0, sel_setTexture, 0)
+	objcutil.Send(c.stencilAttachment, sel_setTexture, 0)
+
 	if rce == 0 {
 		return RenderCommandEncoder{}, errors.New("mtl: renderCommandEncoderWithDescriptor returned nil")
 	}
