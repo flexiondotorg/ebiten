@@ -941,7 +941,9 @@ func (i *Image) DrawTrianglesShader32(vertices []Vertex, indices []uint32, shade
 		sox, soy = src.originF32()
 	}
 	// Subtracting a zero origin changes no value, so skip it.
-	if dox != 0 || doy != 0 || sox != 0 || soy != 0 {
+	// A shader with its own vertex function gets its attributes as they are.
+	adjust := !shader.userVertex && (dox != 0 || doy != 0 || sox != 0 || soy != 0)
+	if adjust {
 		// The caller's vertices must not change, so the adjustment works on a copy.
 		// Without the adjustment, the layers below copy the vertices before they change them.
 		tmp := i.ensureTmpVertices(len(vs))
