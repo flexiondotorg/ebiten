@@ -23,6 +23,7 @@ import (
 	"runtime"
 	"sync"
 
+	"github.com/hajimehoshi/ebiten/v2/internal/graphics"
 	"github.com/hajimehoshi/ebiten/v2/internal/graphicsdriver"
 	"github.com/hajimehoshi/ebiten/v2/internal/graphicsdriver/opengl/gl"
 	"github.com/hajimehoshi/ebiten/v2/internal/shaderir"
@@ -102,7 +103,8 @@ type context struct {
 	locationCache                   *locationCache
 	screenFramebuffer               framebufferNative // This might not be the default frame buffer '0' (e.g. iOS).
 	lastFramebuffer                 framebufferNative
-	lastTexture                     textureNative
+	lastTextures                    [graphics.ShaderSrcImageCount]textureNative // The texture bound to each texture unit.
+	lastActiveTexture               int
 	lastViewportWidth               int
 	lastViewportHeight              int
 	lastBlend                       graphicsdriver.Blend
@@ -114,11 +116,20 @@ type context struct {
 }
 
 func (c *context) bindTexture(t textureNative) {
-	if c.lastTexture == t {
+	c.bindTextureToUnit(c.lastActiveTexture, t)
+}
+
+// bindTextureToUnit binds the texture t to the texture unit idx, unless the unit has it already.
+func (c *context) bindTextureToUnit(idx int, t textureNative) {
+	if c.lastTextures[idx] == t {
 		return
 	}
+	if c.lastActiveTexture != idx {
+		c.ctx.ActiveTexture(uint32(gl.TEXTURE0 + idx))
+		c.lastActiveTexture = idx
+	}
 	c.ctx.BindTexture(gl.TEXTURE_2D, uint32(t))
-	c.lastTexture = t
+	c.lastTextures[idx] = t
 }
 
 func (c *context) bindFramebuffer(f framebufferNative) {
@@ -181,7 +192,9 @@ func (c *context) reset() error {
 	}
 
 	c.locationCache = newLocationCache()
-	c.lastTexture = 0
+	c.lastTextures = [graphics.ShaderSrcImageCount]textureNative{}
+	c.ctx.ActiveTexture(gl.TEXTURE0)
+	c.lastActiveTexture = 0
 	c.lastFramebuffer = invalidFramebuffer
 	c.lastViewportWidth = 0
 	c.lastViewportHeight = 0
@@ -255,8 +268,10 @@ func (c *context) framebufferPixels(buf []byte, f *framebuffer, region image.Rec
 }
 
 func (c *context) deleteTexture(t textureNative) {
-	if c.lastTexture == t {
-		c.lastTexture = 0
+	for i := range c.lastTextures {
+		if c.lastTextures[i] == t {
+			c.lastTextures[i] = 0
+		}
 	}
 	c.ctx.DeleteTexture(uint32(t))
 }

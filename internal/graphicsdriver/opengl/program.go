@@ -133,9 +133,8 @@ type openGLState struct {
 
 	elementArrayBufferSizeInBytes int
 
-	lastProgram       program
-	lastUniforms      uniformCache
-	lastActiveTexture int
+	lastProgram  program
+	lastUniforms uniformCache
 }
 
 // uniformCache keeps the last values of the uniform variables of each program, the sampler variables
@@ -359,9 +358,6 @@ func (g *Graphics) useProgram(program program, uniforms []uniformVariable, textu
 
 		g.state.lastProgram = program
 		g.state.lastUniforms.use(program)
-		g.state.lastActiveTexture = 0
-		g.context.ctx.ActiveTexture(gl.TEXTURE0)
-		g.context.lastTexture = 0 // Make sure next bindTexture call actually does something.
 	}
 
 	for i, u := range uniforms {
@@ -396,14 +392,7 @@ loop:
 			index:         idx,
 		})
 		g.setSampler(program, i, idx)
-		if g.state.lastActiveTexture != idx {
-			g.context.ctx.ActiveTexture(uint32(gl.TEXTURE0 + idx))
-			g.state.lastActiveTexture = idx
-			g.context.lastTexture = 0 // Make sure next bindTexture call actually does something.
-		}
-
-		// Apparently, a texture must be bound every time. The cache is not used here.
-		g.context.bindTexture(t.native)
+		g.context.bindTextureToUnit(idx, t.native)
 
 		idx++
 	}
