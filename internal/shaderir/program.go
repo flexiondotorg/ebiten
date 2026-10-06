@@ -83,6 +83,11 @@ type Func struct {
 	OutParams []Type
 	Return    Type
 	Block     *Block
+
+	// Mediump reports whether the float parameters, the float return value, and the float local variables
+	// of the function have medium precision, from the //kage:precision mediump directive in its doc comment.
+	// Only GLSL ES honors it.
+	Mediump bool
 }
 
 // VertexFunc takes pseudo params, and the number is len(attributes) + len(varyings) + 1.
