@@ -71,10 +71,18 @@ func (i *inputState) update() {
 
 	// Swap the maps: the current states become the previous ones, and the new current
 	// states are rebuilt from the previous ones. This avoids copying the whole maps.
+	//
+	// Do not clear the new current map. A gamepadState is too large for a map slot, so the
+	// map stores it out of line and an insert into an empty slot allocates. Overwriting an
+	// existing entry reuses its storage. The stale entries are deleted after the rebuild.
 	i.gamepadStates, i.prevGamepadStates = i.prevGamepadStates, i.gamepadStates
-	clear(i.gamepadStates)
 
 	i.gamepadIDsBuf = ebiten.AppendGamepadIDs(i.gamepadIDsBuf[:0])
+	for id := range i.gamepadStates {
+		if !slices.Contains(i.gamepadIDsBuf, id) {
+			delete(i.gamepadStates, id)
+		}
+	}
 	for _, id := range i.gamepadIDsBuf {
 		state := i.prevGamepadStates[id]
 
