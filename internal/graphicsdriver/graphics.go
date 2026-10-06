@@ -122,3 +122,10 @@ type FrameTimer interface {
 	// values at zero. The driver times the frames only after the first call.
 	ReadFrameTimings(dst []FrameTiming) (n int, frame int64)
 }
+
+// RendererNamer names the renderer of the graphics library. A driver implements it optionally.
+type RendererNamer interface {
+	// RendererName returns the renderer, the vendor, and the version that the graphics library
+	// reports, or empty strings before the context exists or when the library reports none.
+	RendererName() (renderer, vendor, version string)
+}

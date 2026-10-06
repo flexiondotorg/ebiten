@@ -18,6 +18,7 @@ package opengl
 
 import (
 	"fmt"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/hajimehoshi/ebiten/v2/internal/color"
@@ -65,6 +66,9 @@ type Graphics struct {
 
 	// timer is the GPU timing of the frames, see graphicsdriver.FrameTimer.
 	timer gpuTimer
+
+	// rendererName holds GL_RENDERER, GL_VENDOR, and GL_VERSION, or nil before Initialize.
+	rendererName atomic.Pointer[[3]string]
 
 	graphicsPlatform
 }
@@ -196,7 +200,18 @@ func (g *Graphics) Initialize() error {
 		return err
 	}
 	g.timer.supported.Store(g.context.ctx.HasTimerQuery())
+	if c, ok := g.context.ctx.(interface{ GetString(name uint32) string }); ok {
+		g.rendererName.Store(&[3]string{c.GetString(gl.RENDERER), c.GetString(gl.VENDOR), c.GetString(gl.VERSION)})
+	}
 	return nil
+}
+
+// RendererName implements graphicsdriver.RendererNamer.
+func (g *Graphics) RendererName() (renderer, vendor, version string) {
+	if n := g.rendererName.Load(); n != nil {
+		return n[0], n[1], n[2]
+	}
+	return "", "", ""
 }
 
 // Reset resets or initializes the current OpenGL state.

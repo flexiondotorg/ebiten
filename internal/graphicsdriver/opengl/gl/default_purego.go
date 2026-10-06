@@ -31,6 +31,7 @@ type defaultContext struct {
 	gpGetQueryObjectuiv uintptr
 	gpGetStringi        uintptr
 	hasTimerQuery       bool
+	gpGetString         uintptr
 
 	gpActiveTexture           uintptr
 	gpAttachShader            uintptr
@@ -537,6 +538,8 @@ func (c *defaultContext) LoadFunctions() error {
 	c.gpGetQueryObjectuiv = gq.get("glGetQueryObjectuiv")
 	c.gpGetStringi = gq.get("glGetStringi")
 	c.hasTimerQuery = gq.error() == nil && c.timerQuerySupported()
+	gs := procAddressGetter{ctx: c}
+	c.gpGetString = gs.get("glGetString")
 	return nil
 }
 
@@ -601,4 +604,15 @@ func (c *defaultContext) timerQuerySupported() bool {
 		}
 	}
 	return false
+}
+
+// GetString returns the string name of the context, for example RENDERER, or empty when the context
+// has no glGetString. It is not part of Context: the renderer name reads it once, after the context exists.
+func (c *defaultContext) GetString(name uint32) string {
+	if c.gpGetString == 0 {
+		return ""
+	}
+	var getString func(name uint32) string
+	purego.RegisterFunc(&getString, c.gpGetString)
+	return getString(name)
 }

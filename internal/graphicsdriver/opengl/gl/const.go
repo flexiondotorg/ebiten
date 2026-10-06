@@ -78,3 +78,9 @@ const (
 	QUERY_RESULT_AVAILABLE = 0x8867
 	TIME_ELAPSED           = 0x88BF
 )
+
+const (
+	RENDERER = 0x1F01
+	VENDOR   = 0x1F00
+	VERSION  = 0x1F02
+)

@@ -263,3 +263,13 @@ func (u *UserInterface) ReadFrameTimings(dst []graphicsdriver.FrameTiming) (int,
 	}
 	return d.ReadFrameTimings(dst)
 }
+
+// RendererName returns the renderer, the vendor, and the version that the graphics library reports,
+// see graphicsdriver.RendererNamer, or empty strings.
+func (u *UserInterface) RendererName() (renderer, vendor, version string) {
+	d, ok := u.graphicsDriver.(graphicsdriver.RendererNamer)
+	if !ok {
+		return "", "", ""
+	}
+	return d.RendererName()
+}
