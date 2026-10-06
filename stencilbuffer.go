@@ -148,7 +148,8 @@ func ensureOffscreenImage1(bounds image.Rectangle) *Image {
 	if offscreenImage1 == nil {
 		offscreenImage1 = NewImageWithOptions(bounds.Union(prevBounds), nil)
 	} else {
-		offscreenImage1.Clear()
+		// Clear only the region of this draw: an image that grew for a larger destination stays large.
+		offscreenImage1.SubImage(bounds).(*Image).Clear()
 	}
 	return offscreenImage1
 }
@@ -163,7 +164,8 @@ func ensureOffscreenImage2(bounds image.Rectangle) *Image {
 	if offscreenImage2 == nil {
 		offscreenImage2 = NewImageWithOptions(bounds.Union(prevBounds), nil)
 	} else {
-		offscreenImage2.Clear()
+		// Clear only the region of this draw: an image that grew for a larger destination stays large.
+		offscreenImage2.SubImage(bounds).(*Image).Clear()
 	}
 	return offscreenImage2
 }
