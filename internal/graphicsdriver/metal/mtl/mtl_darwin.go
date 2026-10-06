@@ -33,6 +33,7 @@ import (
 	"github.com/ebitengine/purego/objc"
 
 	"github.com/hajimehoshi/ebiten/v2/internal/cocoa"
+	"github.com/hajimehoshi/ebiten/v2/internal/objcutil"
 )
 
 // GPUFamily represents the functionality for families of GPUs.
@@ -917,18 +918,18 @@ func (rce RenderCommandEncoder) Release() {
 //
 // Reference: https://developer.apple.com/documentation/metal/mtlrendercommandencoder/1515811-setrenderpipelinestate?language=objc.
 func (rce RenderCommandEncoder) SetRenderPipelineState(rps RenderPipelineState) {
-	rce.commandEncoder.Send(sel_setRenderPipelineState, rps.renderPipelineState)
+	objcutil.Send(rce.commandEncoder, sel_setRenderPipelineState, uintptr(rps.renderPipelineState))
 }
 
 func (rce RenderCommandEncoder) SetViewport(viewport Viewport) {
-	rce.commandEncoder.Send(sel_setViewport, viewport)
+	objcutil.SendStruct(rce.commandEncoder, sel_setViewport, unsafe.Pointer(&viewport), unsafe.Sizeof(viewport))
 }
 
 // SetScissorRect sets the scissor rectangle for a fragment scissor test.
 //
 // Reference: https://developer.apple.com/documentation/metal/mtlrendercommandencoder/1515583-setscissorrect?language=objc.
 func (rce RenderCommandEncoder) SetScissorRect(scissorRect ScissorRect) {
-	rce.commandEncoder.Send(sel_setScissorRect, scissorRect)
+	objcutil.SendStruct(rce.commandEncoder, sel_setScissorRect, unsafe.Pointer(&scissorRect), unsafe.Sizeof(scissorRect))
 }
 
 // SetVertexBuffer sets a buffer for the vertex shader function at an index
@@ -936,25 +937,27 @@ func (rce RenderCommandEncoder) SetScissorRect(scissorRect ScissorRect) {
 //
 // Reference: https://developer.apple.com/documentation/metal/mtlrendercommandencoder/1515829-setvertexbuffer?language=objc.
 func (rce RenderCommandEncoder) SetVertexBuffer(buf Buffer, offset, index int) {
-	rce.commandEncoder.Send(sel_setVertexBuffer_offset_atIndex, buf.buffer, offset, index)
+	objcutil.Send(rce.commandEncoder, sel_setVertexBuffer_offset_atIndex, uintptr(buf.buffer), uintptr(offset), uintptr(index))
 }
 
 // SetVertexBytes sets a block of data for the vertex function.
 //
 // Reference: https://developer.apple.com/documentation/metal/mtlrendercommandencoder/1515846-setvertexbytes?language=objc.
 func (rce RenderCommandEncoder) SetVertexBytes(bytes unsafe.Pointer, length uintptr, index int) {
-	rce.commandEncoder.Send(sel_setVertexBytes_length_atIndex, bytes, length, index)
+	// Metal copies the bytes during the call.
+	objcutil.SendPointer(rce.commandEncoder, sel_setVertexBytes_length_atIndex, bytes, length, uintptr(index))
 }
 
 func (rce RenderCommandEncoder) SetFragmentBytes(bytes unsafe.Pointer, length uintptr, index int) {
-	rce.commandEncoder.Send(sel_setFragmentBytes_length_atIndex, bytes, length, index)
+	// Metal copies the bytes during the call.
+	objcutil.SendPointer(rce.commandEncoder, sel_setFragmentBytes_length_atIndex, bytes, length, uintptr(index))
 }
 
 // SetFragmentTexture sets a texture for the fragment function at an index in the texture argument table.
 //
 // Reference: https://developer.apple.com/documentation/metal/mtlrendercommandencoder/1515390-setfragmenttexture?language=objc.
 func (rce RenderCommandEncoder) SetFragmentTexture(texture Texture, index int) {
-	rce.commandEncoder.Send(sel_setFragmentTexture_atIndex, texture.texture, index)
+	objcutil.Send(rce.commandEncoder, sel_setFragmentTexture_atIndex, uintptr(texture.texture), uintptr(index))
 }
 
 func (rce RenderCommandEncoder) SetBlendColor(red, green, blue, alpha float32) {
@@ -973,9 +976,9 @@ func (rce RenderCommandEncoder) DrawPrimitives(typ PrimitiveType, vertexStart, v
 //
 // Reference: https://developer.apple.com/documentation/metal/mtlrendercommandencoder/1515542-drawindexedprimitives
 func (rce RenderCommandEncoder) DrawIndexedPrimitives(typ PrimitiveType, indexCount int, indexType IndexType, indexBuffer Buffer, indexBufferOffset int) {
-	rce.commandEncoder.Send(
+	objcutil.Send(rce.commandEncoder,
 		sel_drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferOffset,
-		uintptr(typ), indexCount, uintptr(indexType), indexBuffer.buffer, indexBufferOffset)
+		uintptr(typ), uintptr(indexCount), uintptr(indexType), uintptr(indexBuffer.buffer), uintptr(indexBufferOffset))
 }
 
 // BlitCommandEncoder is an encoder that specifies resource copy
@@ -1134,14 +1137,15 @@ func (b Buffer) resource() unsafe.Pointer {
 //
 // Reference: https://developer.apple.com/documentation/metal/mtlbuffer/1515373-length?language=objc.
 func (b Buffer) Length() uintptr {
-	return uintptr(b.buffer.Send(sel_length))
+	return objcutil.Send(b.buffer, sel_length)
 }
 
 func (b Buffer) CopyToContents(data unsafe.Pointer, lengthInBytes uintptr) {
-	contents := b.buffer.Send(sel_contents)
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(contents)), lengthInBytes), unsafe.Slice((*byte)(data), lengthInBytes))
+	contents := objcutil.Send(b.buffer, sel_contents)
+	copy(unsafe.Slice(*(**byte)(unsafe.Pointer(&contents)), lengthInBytes), unsafe.Slice((*byte)(data), lengthInBytes))
 	if runtime.GOOS != "ios" {
-		b.buffer.Send(sel_didModifyRange, 0, lengthInBytes)
+		// The argument is an NSRange of the location and the length, which travels in two integer registers.
+		objcutil.Send(b.buffer, sel_didModifyRange, 0, lengthInBytes)
 	}
 }
 
