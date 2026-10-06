@@ -69,6 +69,20 @@ type Resetter interface {
 	Reset() error
 }
 
+// MeshID is the ID of a mesh.
+type MeshID int
+
+// MeshDrawer draws a GPU-resident mesh once for each instance record. A driver implements it optionally.
+type MeshDrawer interface {
+	CanDrawMesh() bool
+
+	// NewMesh uploads the vertices and the indices under the ID.
+	NewMesh(id MeshID, vertices []float32, indices []uint32) error
+
+	// DrawMesh uploads the instance records and draws. An unknown mesh ID draws nothing.
+	DrawMesh(dst ImageID, srcs [graphics.ShaderSrcImageCount]ImageID, shader ShaderID, mesh MeshID, instances []float32, blend Blend, uniforms []uint32) error
+}
+
 type Image interface {
 	ID() ImageID
 	Dispose()

@@ -96,7 +96,12 @@ func (s *Shader) compile() error {
 	}
 	defer s.graphics.context.ctx.DeleteShader(uint32(fs))
 
-	p, err := s.graphics.context.newProgram([]shader{vs, fs}, theArrayBufferLayout.names())
+	names := theArrayBufferLayout.names()
+	// The instance attributes of a mesh draw follow the vertex attributes.
+	for i := len(names); i < len(s.ir.Attributes); i++ {
+		names = append(names, fmt.Sprintf("A%d", i))
+	}
+	p, err := s.graphics.context.newProgram([]shader{vs, fs}, names)
 	if err != nil {
 		return err
 	}

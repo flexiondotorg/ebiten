@@ -117,12 +117,14 @@ type passEntry struct {
 	texHeight int
 	screen    bool
 	draws     int
+	meshes    int
 	shaders   []int
 
 	// The first draw of the pass.
 	blend  graphicsdriver.Blend
 	srcs   [graphics.ShaderSrcImageCount]int
 	region image.Rectangle
+	mesh   bool
 }
 
 // observe records the commands of one flush. The commands are not executed yet. driver can be nil.
@@ -189,7 +191,18 @@ func (p *passLogger) observeCommand(c command) {
 				srcs[i] = src.id
 			}
 		}
-		p.observeDraw(c.dst, c.shader.id, c.blend, srcs, c.dstRegions[0].Region)
+		p.observeDraw(c.dst, c.shader.id, c.blend, srcs, c.dstRegions[0].Region, false)
+	case *drawMeshCommand:
+		if len(c.instances) == 0 {
+			return
+		}
+		var srcs [graphics.ShaderSrcImageCount]int
+		for i, src := range c.srcs {
+			if src != nil {
+				srcs[i] = src.id
+			}
+		}
+		p.observeDraw(c.dst, c.shader.id, c.blend, srcs, image.Rectangle{}, true)
 	case *writePixelsCommand, *readPixelsCommand:
 		// The Metal driver ends the render pass to copy pixels.
 		p.lastDst = nil
@@ -203,7 +216,7 @@ func (p *passLogger) observeCommand(c command) {
 	}
 }
 
-func (p *passLogger) observeDraw(dst *Image, shader int, blend graphicsdriver.Blend, srcs [graphics.ShaderSrcImageCount]int, region image.Rectangle) {
+func (p *passLogger) observeDraw(dst *Image, shader int, blend graphicsdriver.Blend, srcs [graphics.ShaderSrcImageCount]int, region image.Rectangle, mesh bool) {
 	if !p.capturing {
 		return
 	}
@@ -221,6 +234,7 @@ func (p *passLogger) observeDraw(dst *Image, shader int, blend graphicsdriver.Bl
 			blend:     blend,
 			srcs:      srcs,
 			region:    region,
+			mesh:      mesh,
 		}
 		if !dst.screen {
 			// Do not call InternalSize, which caches the size on the image that another thread uses.
@@ -233,6 +247,9 @@ func (p *passLogger) observeDraw(dst *Image, shader int, blend graphicsdriver.Bl
 
 	e := &p.entries[len(p.entries)-1]
 	e.draws++
+	if mesh {
+		e.meshes++
+	}
 	if !slices.Contains(e.shaders, shader) {
 		e.shaders = append(e.shaders, shader)
 	}
@@ -358,7 +375,7 @@ func (p *passLogger) write(w *bytes.Buffer) {
 			gpu += passGPU
 			fmt.Fprintf(w, ", GPU: %.3f ms", ms(passGPU))
 		}
-		fmt.Fprintf(w, ", draws: %d, shaders:", e.draws)
+		fmt.Fprintf(w, ", draws: %d, mesh draws: %d, shaders:", e.draws, e.meshes)
 		for _, s := range e.shaders {
 			fmt.Fprintf(w, " %d", s)
 		}
@@ -370,9 +387,12 @@ func (p *passLogger) write(w *bytes.Buffer) {
 			}
 			fmt.Fprintf(w, " %d", s)
 		}
-		if e.region == image.Rect(0, 0, e.width, e.height) {
+		switch {
+		case e.mesh:
+			fmt.Fprint(w, ", region: whole image (mesh)\n")
+		case e.region == image.Rect(0, 0, e.width, e.height):
 			fmt.Fprintf(w, ", region: %v, whole image\n", e.region)
-		} else {
+		default:
 			fmt.Fprintf(w, ", region: %v, %d%% of the image\n", e.region, 100*e.region.Dx()*e.region.Dy()/max(1, e.width*e.height))
 		}
 

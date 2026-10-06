@@ -32,6 +32,9 @@ type shader12 struct {
 	vertexShader   *_ID3DBlob
 	pixelShader    *_ID3DBlob
 
+	// mesh reports whether the shader reads the instance attributes of a mesh draw.
+	mesh bool
+
 	pipelineStates map[pipelineStateKey]*_ID3D12PipelineState
 }
 
@@ -75,7 +78,7 @@ func (s *shader12) pipelineState(blend graphicsdriver.Blend, screen bool) (*_ID3
 		return state, nil
 	}
 
-	state, err := s.graphics.pipelineStates.newPipelineState(s.graphics.device, s.vertexShader, s.pixelShader, blend, screen)
+	state, err := s.graphics.pipelineStates.newPipelineState(s.graphics.device, s.vertexShader, s.pixelShader, blend, screen, s.mesh)
 	if err != nil {
 		return nil, err
 	}

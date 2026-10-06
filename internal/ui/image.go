@@ -23,6 +23,7 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2/internal/atlas"
 	"github.com/hajimehoshi/ebiten/v2/internal/graphics"
+	"github.com/hajimehoshi/ebiten/v2/internal/graphicscommand"
 	"github.com/hajimehoshi/ebiten/v2/internal/graphicsdriver"
 	"github.com/hajimehoshi/ebiten/v2/internal/mipmap"
 )
@@ -169,6 +170,33 @@ func (i *Image) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 	}
 
 	i.mipmap.DrawTriangles(srcMipmaps, vertices, indices, blend, dstRegion, srcRegions, shader.shader, uniforms, canSkipMipmap)
+}
+
+// DrawMesh draws the mesh once for each instance record.
+func (i *Image) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Image, mesh *graphicscommand.Mesh, instances []float32, blend graphicsdriver.Blend, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32) {
+	var l imagesLocker
+	l.lock(i, srcs)
+	defer l.unlock()
+
+	if i.modifyCallback != nil {
+		i.modifyCallback()
+	}
+
+	i.lastBlend = blend
+
+	var srcMipmaps [graphics.ShaderSrcImageCount]*mipmap.Mipmap
+	for i, src := range srcs {
+		if src != nil {
+			srcMipmaps[i] = src.mipmap
+		}
+	}
+	i.mipmap.DrawMesh(srcMipmaps, mesh, instances, blend, srcRegions, shader.shader, uniforms)
+}
+
+// IsMeshDrawingSupported reports whether the graphics driver can draw a mesh with instances.
+func (u *UserInterface) IsMeshDrawingSupported() bool {
+	d, ok := u.graphicsDriver.(graphicsdriver.MeshDrawer)
+	return ok && d.CanDrawMesh()
 }
 
 func (i *Image) WritePixels(pix []byte, region image.Rectangle) {

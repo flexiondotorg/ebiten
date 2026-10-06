@@ -56,6 +56,8 @@ const (
 	SRC_ALPHA                  = 0x0302
 	SRC_ALPHA_SATURATE         = 0x0308
 	SRC_COLOR                  = 0x0300
+	STATIC_DRAW                = 0x88E4
+	STREAM_DRAW                = 0x88E0
 	STREAM_READ                = 0x88E1
 	SYNC_GPU_COMMANDS_COMPLETE = 0x9117
 	TEXTURE0                   = 0x84C0

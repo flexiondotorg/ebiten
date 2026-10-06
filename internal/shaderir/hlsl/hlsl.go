@@ -189,10 +189,14 @@ func Compile(p *shaderir.Program) (vertexShader, pixelShader, vertexPrelude, pix
 				args = append(args, fmt.Sprintf("float4 A%d : COLOR0", i))
 			default:
 				// Use COLOR[n] as a general purpose varying.
-				if a.Main != shaderir.Vec4 {
-					args = append(args, fmt.Sprintf("?(unexpected type: %s) A%d : COLOR%d", a, i, i-2))
-				} else {
+				switch a.Main {
+				case shaderir.Vec4:
 					args = append(args, fmt.Sprintf("float4 A%d : COLOR%d", i, i-2))
+				case shaderir.Vec2:
+					// The instance attributes of a mesh draw include vec2 values.
+					args = append(args, fmt.Sprintf("float2 A%d : TEXCOORD%d", i, i-3))
+				default:
+					args = append(args, fmt.Sprintf("?(unexpected type: %s) A%d : COLOR%d", a, i, i-2))
 				}
 			}
 		}

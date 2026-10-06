@@ -32,6 +32,7 @@ func TestPassLogGroupsPasses(t *testing.T) {
 	road := &Image{id: 2, width: 512, height: 512}
 	screen := &Image{id: 3, width: 1280, height: 800, screen: true}
 	shader := &Shader{id: 7}
+	mesh := &Mesh{id: 1}
 	full := []graphicsdriver.DstRegion{{Region: image.Rect(0, 0, 1280, 800), IndexCount: 6}}
 
 	tri := func(dst *Image, blend graphicsdriver.Blend, src *Image) command {
@@ -39,9 +40,14 @@ func TestPassLogGroupsPasses(t *testing.T) {
 		srcs[0] = src
 		return &drawTrianglesCommand{dst: dst, srcs: srcs, blend: blend, dstRegions: full, shader: shader}
 	}
+	meshDraw := func(dst *Image) command {
+		return &drawMeshCommand{dst: dst, mesh: mesh, instances: make([]float32, graphics.VertexFloatCount), shader: shader}
+	}
 	frame := []command{
 		tri(scene, graphicsdriver.BlendClear, nil), // pass 1
 		tri(scene, graphicsdriver.BlendSourceOver, nil),
+		meshDraw(scene), // same pass
+		meshDraw(scene),
 		tri(road, graphicsdriver.BlendCopy, nil), // pass 2
 		&writePixelsCommand{dst: road, args: []writePixelsCommandArgs{{region: image.Rect(0, 0, 4, 4)}}},
 		tri(road, graphicsdriver.BlendSourceOver, nil), // pass 3: the write ends pass 2
@@ -56,8 +62,8 @@ func TestPassLogGroupsPasses(t *testing.T) {
 		t.Fatalf("frame 0: got %d entries, want none", len(p.entries))
 	}
 	passLog = p
-	p.observe(frame[:3], graphicsdriver.FlushModeIntermediate, nil)
-	p.observe(frame[3:], graphicsdriver.FlushModePresent, nil)
+	p.observe(frame[:5], graphicsdriver.FlushModeIntermediate, nil)
+	p.observe(frame[5:], graphicsdriver.FlushModePresent, nil)
 	if passLog != nil {
 		passLog = nil
 		t.Fatal("the pass log is still on after the captured frame")
@@ -65,19 +71,19 @@ func TestPassLogGroupsPasses(t *testing.T) {
 
 	type want struct {
 		dst                 int
-		draws               int
+		draws, meshes       int
 		texWidth, texHeight int
 	}
 	wants := []want{
-		{1, 2, 2048, 1024},
-		{2, 1, 512, 512},
-		{2, 1, 512, 512},
-		{3, 1, 1280, 800},
+		{1, 4, 2, 2048, 1024},
+		{2, 1, 0, 512, 512},
+		{2, 1, 0, 512, 512},
+		{3, 1, 0, 1280, 800},
 	}
 	var got []want
 	for _, e := range p.entries {
 		if e.line == "" {
-			got = append(got, want{e.dst, e.draws, e.texWidth, e.texHeight})
+			got = append(got, want{e.dst, e.draws, e.meshes, e.texWidth, e.texHeight})
 		}
 	}
 	if len(got) != len(wants) {
@@ -98,6 +104,7 @@ func TestPassLogGroupsPasses(t *testing.T) {
 	// 1.0 MB each way. Screen: stores 4.1 MB.
 	for _, s := range []string{
 		"passes: 4",
+		"draws: 4, mesh draws: 2, shaders: 7",
 		"loaded 10.5 MB, stored 14.6 MB, total 25.1 MB",
 		"1 1280x800 (2048x1024) 1 8.4 8.4 16.8",
 		"3 1280x800 screen 1 0.0 4.1 4.1",

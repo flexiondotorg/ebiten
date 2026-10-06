@@ -93,6 +93,10 @@ const (
 	FragmentName = "Fragment"
 )
 
+// instanceAttributeIndex is the index of the first attribute that a mesh draw reads
+// for each instance instead of each vertex.
+const instanceAttributeIndex = 4
+
 func Compile(p *shaderir.Program) (shader string) {
 	c := &compileContext{
 		structNames:        map[string]string{},
@@ -125,7 +129,17 @@ func Compile(p *shaderir.Program) (shader string) {
 	if len(p.Attributes) > 0 || hasVertex {
 		lines = append(lines, "")
 		lines = append(lines, "struct Attributes {")
-		for i, a := range p.Attributes {
+		for i, a := range p.Attributes[:min(len(p.Attributes), instanceAttributeIndex)] {
+			lines = append(lines, fmt.Sprintf("\t%s;", c.varDecl(p, &a, fmt.Sprintf("M%d", i), false)))
+		}
+		lines = append(lines, "};")
+	}
+
+	// A mesh draw reads the attributes from instanceAttributeIndex on for each instance.
+	if len(p.Attributes) > instanceAttributeIndex {
+		lines = append(lines, "")
+		lines = append(lines, "struct InstanceAttributes {")
+		for i, a := range p.Attributes[instanceAttributeIndex:] {
 			lines = append(lines, fmt.Sprintf("\t%s;", c.varDecl(p, &a, fmt.Sprintf("M%d", i), false)))
 		}
 		lines = append(lines, "};")
@@ -163,6 +177,10 @@ func Compile(p *shaderir.Program) (shader string) {
 		if len(p.Uniforms) > 0 {
 			lines[len(lines)-1] += ","
 			lines = append(lines, "\tconstant Uniforms& uniforms [[buffer(1)]]")
+		}
+		if len(p.Attributes) > instanceAttributeIndex {
+			lines[len(lines)-1] += ","
+			lines = append(lines, "\tuint iid [[instance_id]],", "\tconst device InstanceAttributes* instances [[buffer(2)]]")
 		}
 		for i := 0; i < p.TextureCount; i++ {
 			lines[len(lines)-1] += ","
@@ -340,6 +358,9 @@ func constantToNumberLiteral(v constant.Value) string {
 }
 
 func attributeName(idx int) string {
+	if idx >= instanceAttributeIndex {
+		return fmt.Sprintf("instances[iid].M%d", idx-instanceAttributeIndex)
+	}
 	return fmt.Sprintf("attributes[vid].M%d", idx)
 }
 

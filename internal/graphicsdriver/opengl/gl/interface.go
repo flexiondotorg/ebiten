@@ -27,6 +27,9 @@ type Context interface {
 	LoadFunctions() error
 	IsES() bool
 
+	// HasInstancing reports whether DrawElementsInstanced and VertexAttribDivisor are available.
+	HasInstancing() bool
+
 	// HasTimerQuery reports whether BeginQuery and EndQuery measure TIME_ELAPSED, from OpenGL 3.3,
 	// GL_ARB_timer_query, or GL_EXT_disjoint_timer_query on OpenGL ES.
 	HasTimerQuery() bool
@@ -61,6 +64,7 @@ type Context interface {
 	DeleteTexture(texture uint32)
 	DeleteVertexArray(array uint32)
 	DrawElements(mode uint32, count int32, xtype uint32, offset int)
+	DrawElementsInstanced(mode uint32, count int32, xtype uint32, offset int, instanceCount int32)
 	Enable(cap uint32)
 	EnableVertexAttribArray(index uint32)
 	EndQuery(target uint32)
@@ -102,6 +106,7 @@ type Context interface {
 	UniformMatrix4fv(location int32, value []float32)
 	UnmapBuffer(target uint32) bool
 	UseProgram(program uint32)
+	VertexAttribDivisor(index uint32, divisor uint32)
 	VertexAttribPointer(index uint32, size int32, xtype uint32, normalized bool, stride int32, offset int)
 	Viewport(x int32, y int32, width int32, height int32)
 }
