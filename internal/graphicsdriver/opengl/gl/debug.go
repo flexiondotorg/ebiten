@@ -77,6 +77,14 @@ func (d *DebugContext) BindFramebuffer(arg0 uint32, arg1 uint32) {
 	}
 }
 
+func (d *DebugContext) BindRenderbuffer(arg0 uint32, arg1 uint32) {
+	d.Context.BindRenderbuffer(arg0, arg1)
+	fmt.Fprintln(os.Stderr, "BindRenderbuffer")
+	if e := d.Context.GetError(); e != NO_ERROR {
+		panic(fmt.Sprintf("gl: GetError() returned %d at BindRenderbuffer", e))
+	}
+}
+
 func (d *DebugContext) BindTexture(arg0 uint32, arg1 uint32) {
 	d.Context.BindTexture(arg0, arg1)
 	fmt.Fprintln(os.Stderr, "BindTexture")
@@ -134,6 +142,14 @@ func (d *DebugContext) CheckFramebufferStatus(arg0 uint32) uint32 {
 	return out0
 }
 
+func (d *DebugContext) Clear(arg0 uint32) {
+	d.Context.Clear(arg0)
+	fmt.Fprintln(os.Stderr, "Clear")
+	if e := d.Context.GetError(); e != NO_ERROR {
+		panic(fmt.Sprintf("gl: GetError() returned %d at Clear", e))
+	}
+}
+
 func (d *DebugContext) CompileShader(arg0 uint32) {
 	d.Context.CompileShader(arg0)
 	fmt.Fprintln(os.Stderr, "CompileShader")
@@ -174,6 +190,15 @@ func (d *DebugContext) CreateQuery() uint32 {
 	fmt.Fprintln(os.Stderr, "CreateQuery")
 	if e := d.Context.GetError(); e != NO_ERROR {
 		panic(fmt.Sprintf("gl: GetError() returned %d at CreateQuery", e))
+	}
+	return out0
+}
+
+func (d *DebugContext) CreateRenderbuffer() uint32 {
+	out0 := d.Context.CreateRenderbuffer()
+	fmt.Fprintln(os.Stderr, "CreateRenderbuffer")
+	if e := d.Context.GetError(); e != NO_ERROR {
+		panic(fmt.Sprintf("gl: GetError() returned %d at CreateRenderbuffer", e))
 	}
 	return out0
 }
@@ -229,6 +254,14 @@ func (d *DebugContext) DeleteProgram(arg0 uint32) {
 	}
 }
 
+func (d *DebugContext) DeleteRenderbuffer(arg0 uint32) {
+	d.Context.DeleteRenderbuffer(arg0)
+	fmt.Fprintln(os.Stderr, "DeleteRenderbuffer")
+	if e := d.Context.GetError(); e != NO_ERROR {
+		panic(fmt.Sprintf("gl: GetError() returned %d at DeleteRenderbuffer", e))
+	}
+}
+
 func (d *DebugContext) DeleteShader(arg0 uint32) {
 	d.Context.DeleteShader(arg0)
 	fmt.Fprintln(os.Stderr, "DeleteShader")
@@ -250,6 +283,22 @@ func (d *DebugContext) DeleteVertexArray(arg0 uint32) {
 	fmt.Fprintln(os.Stderr, "DeleteVertexArray")
 	if e := d.Context.GetError(); e != NO_ERROR {
 		panic(fmt.Sprintf("gl: GetError() returned %d at DeleteVertexArray", e))
+	}
+}
+
+func (d *DebugContext) DepthFunc(arg0 uint32) {
+	d.Context.DepthFunc(arg0)
+	fmt.Fprintln(os.Stderr, "DepthFunc")
+	if e := d.Context.GetError(); e != NO_ERROR {
+		panic(fmt.Sprintf("gl: GetError() returned %d at DepthFunc", e))
+	}
+}
+
+func (d *DebugContext) Disable(arg0 uint32) {
+	d.Context.Disable(arg0)
+	fmt.Fprintln(os.Stderr, "Disable")
+	if e := d.Context.GetError(); e != NO_ERROR {
+		panic(fmt.Sprintf("gl: GetError() returned %d at Disable", e))
 	}
 }
 
@@ -306,6 +355,14 @@ func (d *DebugContext) Flush() {
 	fmt.Fprintln(os.Stderr, "Flush")
 	if e := d.Context.GetError(); e != NO_ERROR {
 		panic(fmt.Sprintf("gl: GetError() returned %d at Flush", e))
+	}
+}
+
+func (d *DebugContext) FramebufferRenderbuffer(arg0 uint32, arg1 uint32, arg2 uint32, arg3 uint32) {
+	d.Context.FramebufferRenderbuffer(arg0, arg1, arg2, arg3)
+	fmt.Fprintln(os.Stderr, "FramebufferRenderbuffer")
+	if e := d.Context.GetError(); e != NO_ERROR {
+		panic(fmt.Sprintf("gl: GetError() returned %d at FramebufferRenderbuffer", e))
 	}
 }
 
@@ -445,6 +502,14 @@ func (d *DebugContext) ReadPixels(arg0 []uint8, arg1 int32, arg2 int32, arg3 int
 	fmt.Fprintln(os.Stderr, "ReadPixels")
 	if e := d.Context.GetError(); e != NO_ERROR {
 		panic(fmt.Sprintf("gl: GetError() returned %d at ReadPixels", e))
+	}
+}
+
+func (d *DebugContext) RenderbufferStorage(arg0 uint32, arg1 uint32, arg2 int32, arg3 int32) {
+	d.Context.RenderbufferStorage(arg0, arg1, arg2, arg3)
+	fmt.Fprintln(os.Stderr, "RenderbufferStorage")
+	if e := d.Context.GetError(); e != NO_ERROR {
+		panic(fmt.Sprintf("gl: GetError() returned %d at RenderbufferStorage", e))
 	}
 }
 

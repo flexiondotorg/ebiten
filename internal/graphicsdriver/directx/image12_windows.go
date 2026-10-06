@@ -35,6 +35,11 @@ type image12 struct {
 	rtvDescriptorHeap *_ID3D12DescriptorHeap
 
 	uploadingStagingBuffers []*_ID3D12Resource
+
+	// depthTexture and dsvDescriptorHeap are the depth buffer, and depthFrame is the frame in which it was cleared last.
+	depthTexture      *_ID3D12Resource
+	dsvDescriptorHeap *_ID3D12DescriptorHeap
+	depthFrame        int64
 }
 
 func (i *image12) ID() graphicsdriver.ImageID {
@@ -55,6 +60,14 @@ func (i *image12) disposeImpl() {
 	if i.texture != nil {
 		i.texture.Release()
 		i.texture = nil
+	}
+	if i.dsvDescriptorHeap != nil {
+		i.dsvDescriptorHeap.Release()
+		i.dsvDescriptorHeap = nil
+	}
+	if i.depthTexture != nil {
+		i.depthTexture.Release()
+		i.depthTexture = nil
 	}
 }
 
@@ -278,7 +291,8 @@ func (i *image12) internalSize() (int, int) {
 	return graphics.InternalImageSize(i.width), graphics.InternalImageSize(i.height)
 }
 
-func (i *image12) setAsRenderTarget(drawCommandList *_ID3D12GraphicsCommandList, device *_ID3D12Device) error {
+// setAsRenderTarget sets i as the render target, with the depth-stencil view dsv if it is not nil.
+func (i *image12) setAsRenderTarget(drawCommandList *_ID3D12GraphicsCommandList, device *_ID3D12Device, dsv *_D3D12_CPU_DESCRIPTOR_HANDLE) error {
 	if err := i.ensureRenderTargetView(device); err != nil {
 		return err
 	}
@@ -289,7 +303,7 @@ func (i *image12) setAsRenderTarget(drawCommandList *_ID3D12GraphicsCommandList,
 			return err
 		}
 		rtv.Offset(int32(i.graphics.backBufferIndex), i.graphics.rtvDescriptorSize)
-		drawCommandList.OMSetRenderTargets([]_D3D12_CPU_DESCRIPTOR_HANDLE{rtv}, false)
+		drawCommandList.OMSetRenderTargets([]_D3D12_CPU_DESCRIPTOR_HANDLE{rtv}, false, dsv)
 		return nil
 	}
 
@@ -298,8 +312,63 @@ func (i *image12) setAsRenderTarget(drawCommandList *_ID3D12GraphicsCommandList,
 		return err
 	}
 
-	drawCommandList.OMSetRenderTargets([]_D3D12_CPU_DESCRIPTOR_HANDLE{rtv}, false)
+	drawCommandList.OMSetRenderTargets([]_D3D12_CPU_DESCRIPTOR_HANDLE{rtv}, false, dsv)
 	return nil
+}
+
+// ensureDepthStencilView makes the depth buffer of i on its first use, and returns its view. The
+// depth buffer stays in the depth-write state. It is untested.
+func (i *image12) ensureDepthStencilView(device *_ID3D12Device) (_D3D12_CPU_DESCRIPTOR_HANDLE, error) {
+	if i.dsvDescriptorHeap != nil {
+		return i.dsvDescriptorHeap.GetCPUDescriptorHandleForHeapStart()
+	}
+
+	w, h := i.internalSize()
+	t, err := device.CreateCommittedResource(&_D3D12_HEAP_PROPERTIES{
+		Type:                 _D3D12_HEAP_TYPE_DEFAULT,
+		CPUPageProperty:      _D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+		MemoryPoolPreference: _D3D12_MEMORY_POOL_UNKNOWN,
+		CreationNodeMask:     1,
+		VisibleNodeMask:      1,
+	}, _D3D12_HEAP_FLAG_NONE, &_D3D12_RESOURCE_DESC{
+		Dimension:        _D3D12_RESOURCE_DIMENSION_TEXTURE2D,
+		Width:            uint64(w),
+		Height:           uint32(h),
+		DepthOrArraySize: 1,
+		MipLevels:        1,
+		Format:           _DXGI_FORMAT_D24_UNORM_S8_UINT,
+		SampleDesc:       _DXGI_SAMPLE_DESC{Count: 1},
+		Layout:           _D3D12_TEXTURE_LAYOUT_UNKNOWN,
+		Flags:            _D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL,
+	}, _D3D12_RESOURCE_STATE_DEPTH_WRITE, &_D3D12_CLEAR_VALUE{
+		Format: _DXGI_FORMAT_D24_UNORM_S8_UINT,
+		Color:  [4]float32{1}, // The depth of the union D3D12_DEPTH_STENCIL_VALUE.
+	})
+	if err != nil {
+		return _D3D12_CPU_DESCRIPTOR_HANDLE{}, err
+	}
+
+	heap, err := device.CreateDescriptorHeap(&_D3D12_DESCRIPTOR_HEAP_DESC{
+		Type:           _D3D12_DESCRIPTOR_HEAP_TYPE_DSV,
+		NumDescriptors: 1,
+		Flags:          _D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
+	})
+	if err != nil {
+		t.Release()
+		return _D3D12_CPU_DESCRIPTOR_HANDLE{}, err
+	}
+
+	dsv, err := heap.GetCPUDescriptorHandleForHeapStart()
+	if err != nil {
+		heap.Release()
+		t.Release()
+		return _D3D12_CPU_DESCRIPTOR_HANDLE{}, err
+	}
+	device.CreateDepthStencilView(t, nil, dsv)
+
+	i.depthTexture = t
+	i.dsvDescriptorHeap = heap
+	return dsv, nil
 }
 
 func (i *image12) ensureRenderTargetView(device *_ID3D12Device) error {

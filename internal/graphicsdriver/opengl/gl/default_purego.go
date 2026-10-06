@@ -38,6 +38,7 @@ type defaultContext struct {
 	gpBindAttribLocation      uintptr
 	gpBindBuffer              uintptr
 	gpBindFramebuffer         uintptr
+	gpBindRenderbuffer        uintptr
 	gpBindTexture             uintptr
 	gpBindVertexArray         uintptr
 	gpBlendEquationSeparate   uintptr
@@ -45,24 +46,30 @@ type defaultContext struct {
 	gpBufferData              uintptr
 	gpBufferSubData           uintptr
 	gpCheckFramebufferStatus  uintptr
+	gpClear                   uintptr
 	gpCompileShader           uintptr
 	gpCreateProgram           uintptr
 	gpCreateShader            uintptr
 	gpDeleteBuffers           uintptr
 	gpDeleteFramebuffers      uintptr
 	gpDeleteProgram           uintptr
+	gpDeleteRenderbuffers     uintptr
 	gpDeleteShader            uintptr
 	gpDeleteTextures          uintptr
 	gpDeleteVertexArrays      uintptr
+	gpDepthFunc               uintptr
+	gpDisable                 uintptr
 	gpDrawElements            uintptr
 	gpDrawElementsInstanced   uintptr
 	gpEnable                  uintptr
 	gpEnableVertexAttribArray uintptr
 	gpFinish                  uintptr
 	gpFlush                   uintptr
+	gpFramebufferRenderbuffer uintptr
 	gpFramebufferTexture2D    uintptr
 	gpGenBuffers              uintptr
 	gpGenFramebuffers         uintptr
+	gpGenRenderbuffers        uintptr
 	gpGenTextures             uintptr
 	gpGenVertexArrays         uintptr
 	gpGetError                uintptr
@@ -76,6 +83,7 @@ type defaultContext struct {
 	gpLinkProgram             uintptr
 	gpPixelStorei             uintptr
 	gpReadPixels              uintptr
+	gpRenderbufferStorage     uintptr
 	gpScissor                 uintptr
 	gpShaderSource            uintptr
 	gpTexImage2D              uintptr
@@ -100,6 +108,10 @@ type defaultContext struct {
 
 	// hasInstancing reports whether the optional functions of the instanced draws are loaded.
 	hasInstancing bool
+
+	// gpInvalidateFramebuffer is optional, and depthAttachment holds its attachment argument.
+	gpInvalidateFramebuffer uintptr
+	depthAttachment         uint32
 
 	// args holds the arguments of call.
 	args [15]uintptr
@@ -161,6 +173,10 @@ func (c *defaultContext) BindFramebuffer(target uint32, framebuffer uint32) {
 	c.call(c.gpBindFramebuffer, uintptr(target), uintptr(framebuffer))
 }
 
+func (c *defaultContext) BindRenderbuffer(target uint32, renderbuffer uint32) {
+	c.call(c.gpBindRenderbuffer, uintptr(target), uintptr(renderbuffer))
+}
+
 func (c *defaultContext) BindTexture(target uint32, texture uint32) {
 	c.call(c.gpBindTexture, uintptr(target), uintptr(texture))
 }
@@ -192,6 +208,10 @@ func (c *defaultContext) CheckFramebufferStatus(target uint32) uint32 {
 	return uint32(ret)
 }
 
+func (c *defaultContext) Clear(mask uint32) {
+	c.call(c.gpClear, uintptr(mask))
+}
+
 func (c *defaultContext) CompileShader(shader uint32) {
 	c.call(c.gpCompileShader, uintptr(shader))
 }
@@ -211,6 +231,12 @@ func (c *defaultContext) CreateFramebuffer() uint32 {
 func (c *defaultContext) CreateProgram() uint32 {
 	ret, _, _ := c.call(c.gpCreateProgram)
 	return uint32(ret)
+}
+
+func (c *defaultContext) CreateRenderbuffer() uint32 {
+	var renderbuffer uint32
+	purego.SyscallN(c.gpGenRenderbuffers, 1, uintptr(unsafe.Pointer(&renderbuffer)))
+	return renderbuffer
 }
 
 func (c *defaultContext) CreateShader(xtype uint32) uint32 {
@@ -246,6 +272,10 @@ func (c *defaultContext) DeleteProgram(program uint32) {
 	c.call(c.gpDeleteProgram, uintptr(program))
 }
 
+func (c *defaultContext) DeleteRenderbuffer(renderbuffer uint32) {
+	purego.SyscallN(c.gpDeleteRenderbuffers, 1, uintptr(unsafe.Pointer(&renderbuffer)))
+}
+
 func (c *defaultContext) DeleteShader(shader uint32) {
 	c.call(c.gpDeleteShader, uintptr(shader))
 }
@@ -256,6 +286,14 @@ func (c *defaultContext) DeleteTexture(texture uint32) {
 
 func (c *defaultContext) DeleteVertexArray(array uint32) {
 	purego.SyscallN(c.gpDeleteVertexArrays, 1, uintptr(unsafe.Pointer(&array)))
+}
+
+func (c *defaultContext) DepthFunc(xfunc uint32) {
+	c.call(c.gpDepthFunc, uintptr(xfunc))
+}
+
+func (c *defaultContext) Disable(cap uint32) {
+	c.call(c.gpDisable, uintptr(cap))
 }
 
 func (c *defaultContext) DrawElements(mode uint32, count int32, xtype uint32, offset int) {
@@ -280,6 +318,10 @@ func (c *defaultContext) Finish() {
 
 func (c *defaultContext) Flush() {
 	c.call(c.gpFlush)
+}
+
+func (c *defaultContext) FramebufferRenderbuffer(target uint32, attachment uint32, renderbuffertarget uint32, renderbuffer uint32) {
+	c.call(c.gpFramebufferRenderbuffer, uintptr(target), uintptr(attachment), uintptr(renderbuffertarget), uintptr(renderbuffer))
 }
 
 func (c *defaultContext) FramebufferTexture2D(target uint32, attachment uint32, textarget uint32, texture uint32, level int32) {
@@ -357,6 +399,10 @@ func (c *defaultContext) PixelStorei(pname uint32, param int32) {
 func (c *defaultContext) ReadPixels(dst []byte, x int32, y int32, width int32, height int32, format uint32, xtype uint32) {
 	purego.SyscallN(c.gpReadPixels, uintptr(x), uintptr(y), uintptr(width), uintptr(height), uintptr(format), uintptr(xtype), uintptr(unsafe.Pointer(&dst[0])))
 	runtime.KeepAlive(dst)
+}
+
+func (c *defaultContext) RenderbufferStorage(target uint32, internalformat uint32, width int32, height int32) {
+	c.call(c.gpRenderbufferStorage, uintptr(target), uintptr(internalformat), uintptr(width), uintptr(height))
 }
 
 func (c *defaultContext) Scissor(x int32, y int32, width int32, height int32) {
@@ -481,6 +527,7 @@ func (c *defaultContext) LoadFunctions() error {
 	c.gpBindAttribLocation = g.get("glBindAttribLocation")
 	c.gpBindBuffer = g.get("glBindBuffer")
 	c.gpBindFramebuffer = g.get("glBindFramebuffer")
+	c.gpBindRenderbuffer = g.get("glBindRenderbuffer")
 	c.gpBindTexture = g.get("glBindTexture")
 	c.gpBindVertexArray = g.get("glBindVertexArray")
 	c.gpBlendEquationSeparate = g.get("glBlendEquationSeparate")
@@ -488,23 +535,29 @@ func (c *defaultContext) LoadFunctions() error {
 	c.gpBufferData = g.get("glBufferData")
 	c.gpBufferSubData = g.get("glBufferSubData")
 	c.gpCheckFramebufferStatus = g.get("glCheckFramebufferStatus")
+	c.gpClear = g.get("glClear")
 	c.gpCompileShader = g.get("glCompileShader")
 	c.gpCreateProgram = g.get("glCreateProgram")
 	c.gpCreateShader = g.get("glCreateShader")
 	c.gpDeleteBuffers = g.get("glDeleteBuffers")
 	c.gpDeleteFramebuffers = g.get("glDeleteFramebuffers")
 	c.gpDeleteProgram = g.get("glDeleteProgram")
+	c.gpDeleteRenderbuffers = g.get("glDeleteRenderbuffers")
 	c.gpDeleteShader = g.get("glDeleteShader")
 	c.gpDeleteTextures = g.get("glDeleteTextures")
 	c.gpDeleteVertexArrays = g.get("glDeleteVertexArrays")
+	c.gpDepthFunc = g.get("glDepthFunc")
+	c.gpDisable = g.get("glDisable")
 	c.gpDrawElements = g.get("glDrawElements")
 	c.gpEnable = g.get("glEnable")
 	c.gpEnableVertexAttribArray = g.get("glEnableVertexAttribArray")
 	c.gpFinish = g.get("glFinish")
 	c.gpFlush = g.get("glFlush")
+	c.gpFramebufferRenderbuffer = g.get("glFramebufferRenderbuffer")
 	c.gpFramebufferTexture2D = g.get("glFramebufferTexture2D")
 	c.gpGenBuffers = g.get("glGenBuffers")
 	c.gpGenFramebuffers = g.get("glGenFramebuffers")
+	c.gpGenRenderbuffers = g.get("glGenRenderbuffers")
 	c.gpGenTextures = g.get("glGenTextures")
 	c.gpGenVertexArrays = g.get("glGenVertexArrays")
 	c.gpGetError = g.get("glGetError")
@@ -518,6 +571,7 @@ func (c *defaultContext) LoadFunctions() error {
 	c.gpLinkProgram = g.get("glLinkProgram")
 	c.gpPixelStorei = g.get("glPixelStorei")
 	c.gpReadPixels = g.get("glReadPixels")
+	c.gpRenderbufferStorage = g.get("glRenderbufferStorage")
 	c.gpScissor = g.get("glScissor")
 	c.gpShaderSource = g.get("glShaderSource")
 	c.gpTexImage2D = g.get("glTexImage2D")
@@ -560,7 +614,22 @@ func (c *defaultContext) LoadFunctions() error {
 	c.gpDrawElementsInstanced = gi.get("glDrawElementsInstanced")
 	c.gpVertexAttribDivisor = gi.get("glVertexAttribDivisor")
 	c.hasInstancing = gi.error() == nil
+
+	// glInvalidateFramebuffer is core in OpenGL ES 3.0 and OpenGL 4.3, and might be missing.
+	gd := procAddressGetter{ctx: c}
+	c.gpInvalidateFramebuffer = gd.get("glInvalidateFramebuffer")
 	return nil
+}
+
+// InvalidateDepth invalidates the depth attachment of the bound framebuffer on OpenGL ES, where the call is core, and
+// does nothing elsewhere. It is not part of Context.
+func (c *defaultContext) InvalidateDepth() {
+	if c.isES && c.gpInvalidateFramebuffer != 0 {
+		c.depthAttachment = DEPTH_ATTACHMENT
+		c.pinner.Pin(&c.depthAttachment)
+		c.call(c.gpInvalidateFramebuffer, FRAMEBUFFER, 1, uintptr(unsafe.Pointer(&c.depthAttachment)))
+		c.pinner.Unpin()
+	}
 }
 
 func (c *defaultContext) HasInstancing() bool {

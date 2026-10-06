@@ -115,6 +115,7 @@ const (
 	PixelFormatRGBA8UNormSRGB PixelFormat = 71  // Ordinary format with four 8-bit normalized unsigned integer components in RGBA order with conversion between sRGB and linear space.
 	PixelFormatBGRA8UNorm     PixelFormat = 80  // Ordinary format with four 8-bit normalized unsigned integer components in BGRA order.
 	PixelFormatBGRA8UNormSRGB PixelFormat = 81  // Ordinary format with four 8-bit normalized unsigned integer components in BGRA order with conversion between sRGB and linear space.
+	PixelFormatDepth32Float   PixelFormat = 252 // A pixel format with one 32-bit floating-point component, used for a depth render target.
 	PixelFormatStencil8       PixelFormat = 253 // A pixel format with an 8-bit unsigned integer component, used for a stencil render target.
 )
 
@@ -321,6 +322,32 @@ const (
 	ColorWriteMaskAll   ColorWriteMask = 0xf
 )
 
+type StencilOperation uint8
+
+const (
+	StencilOperationKeep           StencilOperation = 0
+	StencilOperationZero           StencilOperation = 1
+	StencilOperationReplace        StencilOperation = 2
+	StencilOperationIncrementClamp StencilOperation = 3
+	StencilOperationDecrementClamp StencilOperation = 4
+	StencilOperationInvert         StencilOperation = 5
+	StencilOperationIncrementWrap  StencilOperation = 6
+	StencilOperationDecrementWrap  StencilOperation = 7
+)
+
+type CompareFunction uint8
+
+const (
+	CompareFunctionNever        CompareFunction = 0
+	CompareFunctionLess         CompareFunction = 1
+	CompareFunctionEqual        CompareFunction = 2
+	CompareFunctionLessEqual    CompareFunction = 3
+	CompareFunctionGreater      CompareFunction = 4
+	CompareFunctionNotEqual     CompareFunction = 5
+	CompareFunctionGreaterEqual CompareFunction = 6
+	CompareFunctionAlways       CompareFunction = 7
+)
+
 type CommandBufferStatus uint8
 
 const (
@@ -356,6 +383,9 @@ type RenderPipelineDescriptor struct {
 
 	// StencilAttachmentPixelFormat is the pixel format of the attachment that stores stencil data.
 	StencilAttachmentPixelFormat PixelFormat
+
+	// DepthAttachmentPixelFormat is the pixel format of the attachment that stores depth data.
+	DepthAttachmentPixelFormat PixelFormat
 }
 
 // RenderPipelineColorAttachmentDescriptor describes a color render target that specifies
@@ -388,6 +418,10 @@ type RenderPassDescriptor struct {
 
 	// StencilAttachment is state information for an attachment that stores stencil data.
 	StencilAttachment RenderPassStencilAttachment
+
+	// DepthAttachment is state information for an attachment that stores depth data.
+	// The clear depth is the default of 1.
+	DepthAttachment RenderPassAttachmentDescriptor
 
 	// RenderTargetWidth and RenderTargetHeight limit the render area of the pass in pixels, when both
 	// are more than zero. They must not be more than the size of any attachment. Before macOS 10.15
@@ -465,6 +499,7 @@ var (
 	class_MTLRenderPipelineDescriptor = objc.GetClass("MTLRenderPipelineDescriptor")
 	class_MTLTextureDescriptor        = objc.GetClass("MTLTextureDescriptor")
 	class_MTLRenderPassDescriptor     = objc.GetClass("MTLRenderPassDescriptor")
+	class_MTLDepthStencilDescriptor   = objc.GetClass("MTLDepthStencilDescriptor")
 )
 
 var (
@@ -516,6 +551,18 @@ var (
 	sel_waitUntilScheduled                                                                                                            = objc.RegisterName("waitUntilScheduled")
 	sel_renderCommandEncoderWithDescriptor                                                                                            = objc.RegisterName("renderCommandEncoderWithDescriptor:")
 	sel_stencilAttachment                                                                                                             = objc.RegisterName("stencilAttachment")
+	sel_depthAttachment                                                                                                               = objc.RegisterName("depthAttachment")
+	sel_setDepthAttachmentPixelFormat                                                                                                 = objc.RegisterName("setDepthAttachmentPixelFormat:")
+	sel_setDepthCompareFunction                                                                                                       = objc.RegisterName("setDepthCompareFunction:")
+	sel_setDepthWriteEnabled                                                                                                          = objc.RegisterName("setDepthWriteEnabled:")
+	sel_backFaceStencil                                                                                                               = objc.RegisterName("backFaceStencil")
+	sel_frontFaceStencil                                                                                                              = objc.RegisterName("frontFaceStencil")
+	sel_setStencilFailureOperation                                                                                                    = objc.RegisterName("setStencilFailureOperation:")
+	sel_setDepthFailureOperation                                                                                                      = objc.RegisterName("setDepthFailureOperation:")
+	sel_setDepthStencilPassOperation                                                                                                  = objc.RegisterName("setDepthStencilPassOperation:")
+	sel_setStencilCompareFunction                                                                                                     = objc.RegisterName("setStencilCompareFunction:")
+	sel_newDepthStencilStateWithDescriptor                                                                                            = objc.RegisterName("newDepthStencilStateWithDescriptor:")
+	sel_setDepthStencilState                                                                                                          = objc.RegisterName("setDepthStencilState:")
 	sel_setLoadAction                                                                                                                 = objc.RegisterName("setLoadAction:")
 	sel_setStoreAction                                                                                                                = objc.RegisterName("setStoreAction:")
 	sel_setTexture                                                                                                                    = objc.RegisterName("setTexture:")
@@ -680,6 +727,7 @@ func (d Device) NewRenderPipelineStateWithDescriptor(rpd RenderPipelineDescripto
 	colorAttachments0.Send(sel_setRgbBlendOperation, uintptr(rpd.ColorAttachments[0].RGBBlendOperation))
 	colorAttachments0.Send(sel_setWriteMask, uintptr(rpd.ColorAttachments[0].WriteMask))
 	renderPipelineDescriptor.Send(sel_setStencilAttachmentPixelFormat, uintptr(rpd.StencilAttachmentPixelFormat))
+	renderPipelineDescriptor.Send(sel_setDepthAttachmentPixelFormat, uintptr(rpd.DepthAttachmentPixelFormat))
 	var err cocoa.NSError
 	renderPipelineState := d.device.Send(sel_newRenderPipelineStateWithDescriptor_error,
 		renderPipelineDescriptor,
@@ -739,6 +787,35 @@ func (d Device) NewTextureWithDescriptor(td TextureDescriptor) (Texture, error) 
 	}
 	return Texture{
 		texture: texture,
+	}, nil
+}
+
+// NewDepthStencilStateWithDescriptor creates a depth-stencil state instance.
+//
+// NewDepthStencilStateWithDescriptor returns an error if the state cannot be created.
+//
+// Reference: https://developer.apple.com/documentation/metal/mtldevice/1433412-newdepthstencilstatewithdescript?language=objc.
+func (d Device) NewDepthStencilStateWithDescriptor(dsd DepthStencilDescriptor) (DepthStencilState, error) {
+	depthStencilDescriptor := objc.ID(class_MTLDepthStencilDescriptor).Send(sel_new)
+	depthStencilDescriptor.Send(sel_setDepthCompareFunction, uintptr(dsd.DepthCompareFunction))
+	depthStencilDescriptor.Send(sel_setDepthWriteEnabled, dsd.DepthWriteEnabled)
+	backFaceStencil := depthStencilDescriptor.Send(sel_backFaceStencil)
+	backFaceStencil.Send(sel_setStencilFailureOperation, uintptr(dsd.BackFaceStencil.StencilFailureOperation))
+	backFaceStencil.Send(sel_setDepthFailureOperation, uintptr(dsd.BackFaceStencil.DepthFailureOperation))
+	backFaceStencil.Send(sel_setDepthStencilPassOperation, uintptr(dsd.BackFaceStencil.DepthStencilPassOperation))
+	backFaceStencil.Send(sel_setStencilCompareFunction, uintptr(dsd.BackFaceStencil.StencilCompareFunction))
+	frontFaceStencil := depthStencilDescriptor.Send(sel_frontFaceStencil)
+	frontFaceStencil.Send(sel_setStencilFailureOperation, uintptr(dsd.FrontFaceStencil.StencilFailureOperation))
+	frontFaceStencil.Send(sel_setDepthFailureOperation, uintptr(dsd.FrontFaceStencil.DepthFailureOperation))
+	frontFaceStencil.Send(sel_setDepthStencilPassOperation, uintptr(dsd.FrontFaceStencil.DepthStencilPassOperation))
+	frontFaceStencil.Send(sel_setStencilCompareFunction, uintptr(dsd.FrontFaceStencil.StencilCompareFunction))
+	depthStencilState := d.device.Send(sel_newDepthStencilStateWithDescriptor, depthStencilDescriptor)
+	depthStencilDescriptor.Send(sel_release)
+	if depthStencilState == 0 {
+		return DepthStencilState{}, errors.New("mtl: newDepthStencilStateWithDescriptor returned nil")
+	}
+	return DepthStencilState{
+		depthStencilState: depthStencilState,
 	}, nil
 }
 
@@ -895,6 +972,7 @@ type renderPassDescriptorObject struct {
 	descriptor        objc.ID
 	colorAttachment0  objc.ID
 	stencilAttachment objc.ID
+	depthAttachment   objc.ID
 	clearColor        ClearColor
 }
 
@@ -923,6 +1001,7 @@ func (cb CommandBuffer) RenderCommandEncoderWithDescriptorCache(c *RenderPassDes
 		d.descriptor = objc.ID(class_MTLRenderPassDescriptor).Send(sel_new)
 		d.colorAttachment0 = d.descriptor.Send(sel_colorAttachments).Send(sel_objectAtIndexedSubscript, 0)
 		d.stencilAttachment = d.descriptor.Send(sel_stencilAttachment)
+		d.depthAttachment = d.descriptor.Send(sel_depthAttachment)
 		d.colorAttachment0.Send(sel_setClearColor, rpd.ColorAttachments[0].ClearColor)
 		d.clearColor = rpd.ColorAttachments[0].ClearColor
 	}
@@ -942,6 +1021,9 @@ func (cb CommandBuffer) RenderCommandEncoderWithDescriptorCache(c *RenderPassDes
 	objcutil.Send(d.stencilAttachment, sel_setLoadAction, uintptr(rpd.StencilAttachment.LoadAction))
 	objcutil.Send(d.stencilAttachment, sel_setStoreAction, uintptr(rpd.StencilAttachment.StoreAction))
 	objcutil.Send(d.stencilAttachment, sel_setTexture, uintptr(rpd.StencilAttachment.Texture.texture))
+	objcutil.Send(d.depthAttachment, sel_setLoadAction, uintptr(rpd.DepthAttachment.LoadAction))
+	objcutil.Send(d.depthAttachment, sel_setStoreAction, uintptr(rpd.DepthAttachment.StoreAction))
+	objcutil.Send(d.depthAttachment, sel_setTexture, uintptr(rpd.DepthAttachment.Texture.texture))
 	if withSize {
 		objcutil.Send(d.descriptor, sel_setRenderTargetWidth, uintptr(rpd.RenderTargetWidth))
 		objcutil.Send(d.descriptor, sel_setRenderTargetHeight, uintptr(rpd.RenderTargetHeight))
@@ -951,6 +1033,7 @@ func (cb CommandBuffer) RenderCommandEncoderWithDescriptorCache(c *RenderPassDes
 	// Do not keep the textures, for example a drawable, alive in the descriptor.
 	objcutil.Send(d.colorAttachment0, sel_setTexture, 0)
 	objcutil.Send(d.stencilAttachment, sel_setTexture, 0)
+	objcutil.Send(d.depthAttachment, sel_setTexture, 0)
 
 	if rce == 0 {
 		return RenderCommandEncoder{}, errors.New("mtl: renderCommandEncoderWithDescriptor returned nil")
@@ -1019,6 +1102,13 @@ func (rce RenderCommandEncoder) Release() {
 // Reference: https://developer.apple.com/documentation/metal/mtlrendercommandencoder/1515811-setrenderpipelinestate?language=objc.
 func (rce RenderCommandEncoder) SetRenderPipelineState(rps RenderPipelineState) {
 	objcutil.Send(rce.commandEncoder, sel_setRenderPipelineState, uintptr(rps.renderPipelineState))
+}
+
+// SetDepthStencilState sets the depth and stencil test state.
+//
+// Reference: https://developer.apple.com/documentation/metal/mtlrendercommandencoder/1516119-setdepthstencilstate?language=objc.
+func (rce RenderCommandEncoder) SetDepthStencilState(depthStencilState DepthStencilState) {
+	objcutil.Send(rce.commandEncoder, sel_setDepthStencilState, uintptr(depthStencilState.depthStencilState))
 }
 
 func (rce RenderCommandEncoder) SetViewport(viewport Viewport) {
@@ -1369,4 +1459,49 @@ type ScissorRect struct {
 	Y      int
 	Width  int
 	Height int
+}
+
+// DepthStencilState is a depth and stencil state object that specifies the depth and stencil configuration and operations used in a render pass.
+//
+// Reference: https://developer.apple.com/documentation/metal/mtldepthstencilstate?language=objc.
+type DepthStencilState struct {
+	depthStencilState objc.ID
+}
+
+func (d DepthStencilState) Release() {
+	d.depthStencilState.Send(sel_release)
+}
+
+// DepthStencilDescriptor is an object that configures new MTLDepthStencilState objects.
+//
+// Reference: https://developer.apple.com/documentation/metal/mtldepthstencildescriptor?language=objc.
+type DepthStencilDescriptor struct {
+	// DepthCompareFunction is the comparison that is performed between a fragment's depth value and the depth value in the attachment.
+	DepthCompareFunction CompareFunction
+
+	// DepthWriteEnabled is whether depth values are written to the depth attachment.
+	DepthWriteEnabled bool
+
+	// BackFaceStencil is the stencil descriptor for back-facing primitives.
+	BackFaceStencil StencilDescriptor
+
+	// FrontFaceStencil is The stencil descriptor for front-facing primitives.
+	FrontFaceStencil StencilDescriptor
+}
+
+// StencilDescriptor is an object that defines the front-facing or back-facing stencil operations of a depth and stencil state object.
+//
+// Reference: https://developer.apple.com/documentation/metal/mtlstencildescriptor?language=objc.
+type StencilDescriptor struct {
+	// StencilFailureOperation is the operation that is performed to update the values in the stencil attachment when the stencil test fails.
+	StencilFailureOperation StencilOperation
+
+	// DepthFailureOperation is the operation that is performed to update the values in the stencil attachment when the stencil test passes, but the depth test fails.
+	DepthFailureOperation StencilOperation
+
+	// DepthStencilPassOperation is the operation that is performed to update the values in the stencil attachment when both the stencil test and the depth test pass.
+	DepthStencilPassOperation StencilOperation
+
+	// StencilCompareFunction is the comparison that is performed between the masked reference value and a masked value in the stencil attachment.
+	StencilCompareFunction CompareFunction
 }

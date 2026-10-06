@@ -79,14 +79,14 @@ func (m *Mipmap) ReadPixels(graphicsDriver graphicsdriver.Graphics, pixels []byt
 }
 
 // DrawMesh draws the mesh once for each instance record.
-func (m *Mipmap) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Mipmap, mesh *graphicscommand.Mesh, instances []float32, blend graphicsdriver.Blend, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *atlas.Shader, uniforms []uint32) {
+func (m *Mipmap) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Mipmap, mesh *graphicscommand.Mesh, instances []float32, blend graphicsdriver.Blend, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *atlas.Shader, uniforms []uint32, depth bool) {
 	var imgs [graphics.ShaderSrcImageCount]*buffered.Image
 	for i, src := range srcs {
 		if src != nil {
 			imgs[i] = src.orig
 		}
 	}
-	m.orig.DrawMesh(imgs, mesh, instances, blend, srcRegions, shader, uniforms)
+	m.orig.DrawMesh(imgs, mesh, instances, blend, srcRegions, shader, uniforms, depth)
 	m.markDirty()
 }
 

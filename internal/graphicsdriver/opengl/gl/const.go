@@ -22,6 +22,10 @@ const (
 	CLAMP_TO_EDGE         = 0x812F
 	COLOR_ATTACHMENT0     = 0x8CE0
 	COMPLETION_STATUS_KHR = 0x91B1
+	DEPTH_ATTACHMENT      = 0x8D00
+	DEPTH_BUFFER_BIT      = 0x0100
+	DEPTH_COMPONENT24     = 0x81A6
+	DEPTH_TEST            = 0x0B71
 	DST_ALPHA             = 0x0304
 	DST_COLOR             = 0x0306
 	DYNAMIC_DRAW          = 0x88E8
@@ -36,6 +40,7 @@ const (
 	FUNC_REVERSE_SUBTRACT = 0x800b
 	FUNC_SUBTRACT         = 0x800a
 	INFO_LOG_LENGTH       = 0x8B84
+	LEQUAL                = 0x0203
 	LINK_STATUS           = 0x8B82
 	MAX                   = 0x8008
 	MAX_TEXTURE_SIZE      = 0x0D33
@@ -47,6 +52,7 @@ const (
 	ONE_MINUS_DST_COLOR   = 0x0307
 	ONE_MINUS_SRC_ALPHA   = 0x0303
 	ONE_MINUS_SRC_COLOR   = 0x0301
+	RENDERBUFFER          = 0x8D41
 	RGBA                  = 0x1908
 	SCISSOR_TEST          = 0x0C11
 	SRC_ALPHA             = 0x0302

@@ -77,11 +77,15 @@ func (f *FrameTimings) Begin(frame int64, start float64) {
 	}
 }
 
-// AddPass counts a render pass of frame.
-func (f *FrameTimings) AddPass(frame int64) {
+// AddPass counts a render pass of frame, and its depth attachment.
+func (f *FrameTimings) AddPass(frame int64, depth bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.record(frame).timing.Passes++
+	r := f.record(frame)
+	r.timing.Passes++
+	if depth {
+		r.timing.DepthPasses++
+	}
 }
 
 // AddQueueWait adds a wait for a command buffer to frame.

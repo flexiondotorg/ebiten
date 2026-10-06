@@ -108,7 +108,7 @@ func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 }
 
 // DrawMesh draws the mesh once for each instance record.
-func (i *Image) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Image, mesh *graphicscommand.Mesh, instances []float32, blend graphicsdriver.Blend, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *atlas.Shader, uniforms []uint32) {
+func (i *Image) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Image, mesh *graphicscommand.Mesh, instances []float32, blend graphicsdriver.Blend, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *atlas.Shader, uniforms []uint32, depth bool) {
 	var imgs [graphics.ShaderSrcImageCount]*atlas.Image
 	for j, src := range srcs {
 		if i == src {
@@ -121,7 +121,7 @@ func (i *Image) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Image, mesh *graphi
 	}
 	i.writeBackPixelsIfNeeded()
 
-	i.img.DrawMesh(imgs, mesh, instances, blend, srcRegions, shader, uniforms)
+	i.img.DrawMesh(imgs, mesh, instances, blend, srcRegions, shader, uniforms, depth)
 	i.cache.reset()
 }
 

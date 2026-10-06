@@ -172,10 +172,11 @@ type drawMeshCommand struct {
 	blend     graphicsdriver.Blend
 	shader    *Shader
 	uniforms  []uint32
+	depth     bool
 }
 
 func (c *drawMeshCommand) String() string {
-	return fmt.Sprintf("draw-mesh: dst: %d, mesh: %d, num of instances: %d, shader: %d", c.dst.id, c.mesh.id, len(c.instances)/graphics.VertexFloatCount, c.shader.id)
+	return fmt.Sprintf("draw-mesh: dst: %d, mesh: %d, num of instances: %d, shader: %d, depth: %t", c.dst.id, c.mesh.id, len(c.instances)/graphics.VertexFloatCount, c.shader.id, c.depth)
 }
 
 func (c *drawMeshCommand) Exec(commandQueue *commandQueue, graphicsDriver graphicsdriver.Graphics, indexOffset int) error {
@@ -187,7 +188,7 @@ func (c *drawMeshCommand) Exec(commandQueue *commandQueue, graphicsDriver graphi
 		}
 		imgs[i] = src.image.ID()
 	}
-	return graphicsDriver.(graphicsdriver.MeshDrawer).DrawMesh(c.dst.image.ID(), imgs, c.shader.shader.ID(), c.mesh.id, c.instances, c.blend, c.uniforms)
+	return graphicsDriver.(graphicsdriver.MeshDrawer).DrawMesh(c.dst.image.ID(), imgs, c.shader.shader.ID(), c.mesh.id, c.instances, c.blend, c.uniforms, c.depth)
 }
 
 func (c *drawMeshCommand) NeedsSync() bool {

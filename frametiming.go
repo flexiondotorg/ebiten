@@ -43,8 +43,9 @@ type FrameTiming struct {
 	// QueueWait is the time that the frame waits for new command buffers from the queue.
 	QueueWait time.Duration
 
-	// Passes is the count of render passes of the frame.
-	Passes int
+	// Passes is the count of render passes of the frame, and DepthPasses the count of the passes
+	// with a depth attachment.
+	Passes, DepthPasses int
 }
 
 // The conversion compiles only while the two types have the same fields, so that

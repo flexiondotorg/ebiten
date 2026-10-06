@@ -79,8 +79,9 @@ type MeshDrawer interface {
 	// NewMesh uploads the vertices and the indices under the ID.
 	NewMesh(id MeshID, vertices []float32, indices []uint32) error
 
-	// DrawMesh uploads the instance records and draws. An unknown mesh ID draws nothing.
-	DrawMesh(dst ImageID, srcs [graphics.ShaderSrcImageCount]ImageID, shader ShaderID, mesh MeshID, instances []float32, blend Blend, uniforms []uint32) error
+	// DrawMesh uploads the instance records, gives dst a depth buffer on its first depth draw and
+	// clears it once a frame, and draws. An unknown mesh ID draws nothing.
+	DrawMesh(dst ImageID, srcs [graphics.ShaderSrcImageCount]ImageID, shader ShaderID, mesh MeshID, instances []float32, blend Blend, uniforms []uint32, depth bool) error
 }
 
 type Image interface {
@@ -124,8 +125,9 @@ type FrameTiming struct {
 	// QueueWait is the time that the frame waits for new command buffers from the queue.
 	QueueWait time.Duration
 
-	// Passes is the count of render passes of the frame.
-	Passes int
+	// Passes is the count of render passes of the frame, and DepthPasses the count of the passes
+	// with a depth attachment.
+	Passes, DepthPasses int
 }
 
 // FrameTimer reports the GPU timing of each frame. A driver implements it optionally.
@@ -142,6 +144,9 @@ type PassTime struct {
 	// Dst is the destination image of the pass, and Width and Height are its size.
 	Dst           ImageID
 	Width, Height int
+
+	// Depth reports whether the pass has a depth attachment.
+	Depth bool
 
 	// GPU is the GPU time of the command buffer of the pass on Metal, and of a timer query on
 	// OpenGL.

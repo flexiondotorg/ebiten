@@ -32,9 +32,9 @@ import (
 // ebiten.CaptureRenderPasses calls it.
 //
 // The log groups the draw commands of one frame into render passes as the Metal driver does: a new
-// pass at each flush, after a pixel write or read, and when the destination changes. The command
-// stream is the same on every graphics driver, so a run with any driver gives the passes that Metal
-// makes.
+// pass at each flush, after a pixel write or read, when the destination changes, and when a depth
+// draw needs the first depth clear of its destination in the frame. The command stream is the same
+// on every graphics driver, so a run with any driver gives the passes that Metal makes.
 //
 // A graphics driver that implements graphicsdriver.PassTimer (Metal and OpenGL) times each render pass
 // of the captured frame, and the log waits for the GPU to complete the frame before it writes the file
@@ -51,8 +51,8 @@ var passLog *passLogger
 var passLogRequest atomic.Pointer[string]
 
 // RequestPassLog asks for a pass log of one frame, written to path. The log starts at the end of
-// the next frame while no other pass log runs, and captures its second frame. A later request
-// replaces a request that waits.
+// the next frame while no other pass log runs, and captures its second frame, so that it knows
+// which images have a depth buffer. A later request replaces a request that waits.
 func RequestPassLog(path string) {
 	passLogRequest.Store(&path)
 }
@@ -71,6 +71,8 @@ func newPassLogger(path string, frame int64) *passLogger {
 	return &passLogger{
 		path:    path,
 		capture: frame,
+		depth:   map[int]bool{},
+		cleared: map[int]bool{},
 	}
 }
 
@@ -85,6 +87,13 @@ type passLogger struct {
 
 	// capturing reports whether the current frame is the captured frame.
 	capturing bool
+
+	// depth holds the IDs of the images that have a depth buffer. The driver gives an image a
+	// depth buffer at its first depth draw, and the image keeps it.
+	depth map[int]bool
+
+	// cleared holds the IDs of the images whose depth buffer the captured frame cleared.
+	cleared map[int]bool
 
 	lastDst *Image
 	entries []passEntry
@@ -109,16 +118,18 @@ type passEntry struct {
 	// line is not empty for an entry that is not a render pass.
 	line string
 
-	index     int
-	dst       int
-	width     int
-	height    int
-	texWidth  int
-	texHeight int
-	screen    bool
-	draws     int
-	meshes    int
-	shaders   []int
+	index      int
+	dst        int
+	width      int
+	height     int
+	texWidth   int
+	texHeight  int
+	screen     bool
+	depth      bool
+	clearDepth bool
+	draws      int
+	meshes     int
+	shaders    []int
 
 	// The first draw of the pass.
 	blend  graphicsdriver.Blend
@@ -191,7 +202,7 @@ func (p *passLogger) observeCommand(c command) {
 				srcs[i] = src.id
 			}
 		}
-		p.observeDraw(c.dst, c.shader.id, c.blend, srcs, c.dstRegions[0].Region, false)
+		p.observeDraw(c.dst, c.shader.id, c.blend, srcs, c.dstRegions[0].Region, false, c.blend.DepthTest)
 	case *drawMeshCommand:
 		if len(c.instances) == 0 {
 			return
@@ -202,7 +213,7 @@ func (p *passLogger) observeCommand(c command) {
 				srcs[i] = src.id
 			}
 		}
-		p.observeDraw(c.dst, c.shader.id, c.blend, srcs, image.Rectangle{}, true)
+		p.observeDraw(c.dst, c.shader.id, c.blend, srcs, image.Rectangle{}, true, c.depth)
 	case *writePixelsCommand, *readPixelsCommand:
 		// The Metal driver ends the render pass to copy pixels.
 		p.lastDst = nil
@@ -216,25 +227,35 @@ func (p *passLogger) observeCommand(c command) {
 	}
 }
 
-func (p *passLogger) observeDraw(dst *Image, shader int, blend graphicsdriver.Blend, srcs [graphics.ShaderSrcImageCount]int, region image.Rectangle, mesh bool) {
+func (p *passLogger) observeDraw(dst *Image, shader int, blend graphicsdriver.Blend, srcs [graphics.ShaderSrcImageCount]int, region image.Rectangle, mesh, depth bool) {
+	if depth {
+		p.depth[dst.id] = true
+	}
 	if !p.capturing {
 		return
 	}
 
-	if p.lastDst != dst {
+	clearDepth := depth && !p.cleared[dst.id]
+	if p.lastDst != dst || clearDepth {
+		hasDepth := p.depth[dst.id]
+		if hasDepth && clearDepth {
+			p.cleared[dst.id] = true
+		}
 		p.passes++
 		e := passEntry{
-			index:     p.passes,
-			dst:       dst.id,
-			width:     dst.width,
-			height:    dst.height,
-			texWidth:  dst.width,
-			texHeight: dst.height,
-			screen:    dst.screen,
-			blend:     blend,
-			srcs:      srcs,
-			region:    region,
-			mesh:      mesh,
+			index:      p.passes,
+			dst:        dst.id,
+			width:      dst.width,
+			height:     dst.height,
+			texWidth:   dst.width,
+			texHeight:  dst.height,
+			screen:     dst.screen,
+			depth:      hasDepth,
+			clearDepth: hasDepth && clearDepth,
+			blend:      blend,
+			srcs:       srcs,
+			region:     region,
+			mesh:       mesh,
 		}
 		if !dst.screen {
 			// Do not call InternalSize, which caches the size on the image that another thread uses.
@@ -274,7 +295,7 @@ func (p *passLogger) poll(mode graphicsdriver.FlushMode) {
 }
 
 // timesMatch reports whether the driver timed the passes of the log: the same count, and in each
-// pass the same size.
+// pass the same size and depth attachment.
 func (p *passLogger) timesMatch() bool {
 	if !p.timed {
 		return false
@@ -288,7 +309,7 @@ func (p *passLogger) timesMatch() bool {
 			return false
 		}
 		t := p.times[i]
-		if t.Width != e.width || t.Height != e.height {
+		if t.Width != e.width || t.Height != e.height || t.Depth != e.depth {
 			return false
 		}
 		i++
@@ -314,13 +335,20 @@ func (p *passLogger) done() {
 }
 
 // passTraffic returns the estimated bytes that a tile-based GPU loads and stores for the pass: 4 bytes
-// a pixel of the whole texture. An offscreen pass loads and stores the colour image, and a screen pass
-// clears it and stores it.
+// a pixel of the whole texture for colour and for depth. An offscreen pass loads and stores the colour
+// image, and a screen pass clears it and stores it. A depth buffer loads unless the pass clears it, and
+// stores.
 func passTraffic(e *passEntry) (loaded, stored int64) {
 	px := int64(e.texWidth) * int64(e.texHeight)
 	stored = 4 * px
 	if !e.screen {
 		loaded = 4 * px
+	}
+	if e.depth {
+		stored += 4 * px
+		if !e.clearDepth {
+			loaded += 4 * px
+		}
 	}
 	return loaded, stored
 }
@@ -341,16 +369,16 @@ func (p *passLogger) write(w *bytes.Buffer) {
 	fmt.Fprintln(w)
 
 	type group struct {
-		dst                 int
-		width, height       int
-		texWidth, texHeight int
-		screen              bool
-		passes              int
-		loaded, stored      int64
-		gpu                 time.Duration
+		dst                   int
+		width, height         int
+		texWidth, texHeight   int
+		screen                bool
+		passes, depth, clears int
+		loaded, stored        int64
+		gpu                   time.Duration
 	}
 	var groups []group
-	var passes int
+	var passes, depth, clears int
 	var loaded, stored int64
 	var gpu time.Duration
 
@@ -368,6 +396,14 @@ func (p *passLogger) write(w *bytes.Buffer) {
 		fmt.Fprintf(w, "pass %d: dst %d (%s) %dx%d", e.index, e.dst, kind, e.width, e.height)
 		if e.texWidth != e.width || e.texHeight != e.height {
 			fmt.Fprintf(w, " in a %dx%d texture", e.texWidth, e.texHeight)
+		}
+		switch {
+		case e.clearDepth:
+			fmt.Fprint(w, ", depth: clears")
+		case e.depth:
+			fmt.Fprint(w, ", depth: loads")
+		default:
+			fmt.Fprint(w, ", depth: none")
 		}
 		var passGPU time.Duration
 		if joined {
@@ -399,6 +435,12 @@ func (p *passLogger) write(w *bytes.Buffer) {
 		l, s := passTraffic(e)
 		loaded += l
 		stored += s
+		if e.depth {
+			depth++
+		}
+		if e.clearDepth {
+			clears++
+		}
 		gi := slices.IndexFunc(groups, func(g group) bool { return g.dst == e.dst })
 		if gi < 0 {
 			groups = append(groups, group{dst: e.dst, width: e.width, height: e.height, texWidth: e.texWidth, texHeight: e.texHeight, screen: e.screen})
@@ -406,15 +448,21 @@ func (p *passLogger) write(w *bytes.Buffer) {
 		}
 		g := &groups[gi]
 		g.passes++
+		if e.depth {
+			g.depth++
+		}
+		if e.clearDepth {
+			g.clears++
+		}
 		g.loaded += l
 		g.stored += s
 		g.gpu += passGPU
 	}
 
 	fmt.Fprintf(w, "\nSummary\n\n")
-	fmt.Fprintf(w, "passes: %d\n", passes)
+	fmt.Fprintf(w, "passes: %d, with depth: %d, that clear depth: %d\n", passes, depth, clears)
 	fmt.Fprintf(w, "estimated bytes a frame on a tile-based GPU: loaded %.1f MB, stored %.1f MB, total %.1f MB\n", mb(loaded), mb(stored), mb(loaded+stored))
-	fmt.Fprintf(w, "(4 bytes a pixel of the whole texture; an offscreen pass loads and stores colour; a screen pass clears and stores colour)\n")
+	fmt.Fprintf(w, "(4 bytes a pixel of the whole texture for colour and for depth; an offscreen pass loads and stores colour; a screen pass clears and stores colour; depth loads unless the pass clears it, and stores)\n")
 	if joined {
 		fmt.Fprintf(w, "GPU time of the passes: %.3f ms\n", ms(gpu))
 	}
@@ -423,7 +471,7 @@ func (p *passLogger) write(w *bytes.Buffer) {
 	slices.SortStableFunc(groups, func(a, b group) int {
 		return cmp.Compare(b.loaded+b.stored, a.loaded+a.stored)
 	})
-	fmt.Fprintf(w, "%6s %-24s %6s %10s %10s %10s", "dst", "size (texture)", "passes", "loaded MB", "stored MB", "total MB")
+	fmt.Fprintf(w, "%6s %-24s %6s %6s %6s %10s %10s %10s", "dst", "size (texture)", "passes", "depth", "clears", "loaded MB", "stored MB", "total MB")
 	if joined {
 		fmt.Fprintf(w, " %10s", "GPU ms")
 	}
@@ -435,7 +483,7 @@ func (p *passLogger) write(w *bytes.Buffer) {
 		} else if g.texWidth != g.width || g.texHeight != g.height {
 			size += fmt.Sprintf(" (%dx%d)", g.texWidth, g.texHeight)
 		}
-		fmt.Fprintf(w, "%6d %-24s %6d %10.1f %10.1f %10.1f", g.dst, size, g.passes, mb(g.loaded), mb(g.stored), mb(g.loaded+g.stored))
+		fmt.Fprintf(w, "%6d %-24s %6d %6d %6d %10.1f %10.1f %10.1f", g.dst, size, g.passes, g.depth, g.clears, mb(g.loaded), mb(g.stored), mb(g.loaded+g.stored))
 		if joined {
 			fmt.Fprintf(w, " %10.3f", ms(g.gpu))
 		}
@@ -445,7 +493,11 @@ func (p *passLogger) write(w *bytes.Buffer) {
 	if p.timed && !joined {
 		fmt.Fprintf(w, "\nRender passes of the graphics driver, with the image IDs of the driver\n\n")
 		for i, t := range p.times {
-			fmt.Fprintf(w, "pass %d: driver image %d %dx%d, GPU: %.3f ms\n", i+1, t.Dst, t.Width, t.Height, ms(t.GPU))
+			d := "none"
+			if t.Depth {
+				d = "yes"
+			}
+			fmt.Fprintf(w, "pass %d: driver image %d %dx%d, depth: %s, GPU: %.3f ms\n", i+1, t.Dst, t.Width, t.Height, d, ms(t.GPU))
 		}
 	}
 }

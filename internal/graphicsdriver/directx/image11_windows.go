@@ -33,6 +33,11 @@ type image11 struct {
 	texture            *_ID3D11Texture2D
 	renderTargetView   *_ID3D11RenderTargetView
 	shaderResourceView *_ID3D11ShaderResourceView
+
+	// depthTexture and depthStencilView are the depth buffer, and depthFrame is the frame in which it was cleared last.
+	depthTexture     *_ID3D11Texture2D
+	depthStencilView *_ID3D11DepthStencilView
+	depthFrame       int64
 }
 
 func (i *image11) internalSize() (int, int) {
@@ -63,6 +68,14 @@ func (i *image11) disposeBuffers() {
 	if i.shaderResourceView != nil {
 		i.shaderResourceView.Release()
 		i.shaderResourceView = nil
+	}
+	if i.depthStencilView != nil {
+		i.depthStencilView.Release()
+		i.depthStencilView = nil
+	}
+	if i.depthTexture != nil {
+		i.depthTexture.Release()
+		i.depthTexture = nil
 	}
 }
 
@@ -143,7 +156,8 @@ func (i *image11) WritePixels(args []graphicsdriver.PixelsArgs) error {
 	return nil
 }
 
-func (i *image11) setAsRenderTarget() error {
+// setAsRenderTarget sets i as the render target, with the depth-stencil view dsv if it is not nil.
+func (i *image11) setAsRenderTarget(dsv *_ID3D11DepthStencilView) error {
 	if i.renderTargetView == nil {
 		rtv, err := i.graphics.device.CreateRenderTargetView(unsafe.Pointer(i.texture), nil)
 		if err != nil {
@@ -152,8 +166,38 @@ func (i *image11) setAsRenderTarget() error {
 		i.renderTargetView = rtv
 	}
 
-	i.graphics.deviceContext.OMSetRenderTargets([]*_ID3D11RenderTargetView{i.renderTargetView})
+	i.graphics.deviceContext.OMSetRenderTargets([]*_ID3D11RenderTargetView{i.renderTargetView}, dsv)
 	return nil
+}
+
+// ensureDepthStencilView makes the depth buffer of i on its first use. It is untested.
+func (i *image11) ensureDepthStencilView() (*_ID3D11DepthStencilView, error) {
+	if i.depthStencilView != nil {
+		return i.depthStencilView, nil
+	}
+
+	w, h := i.internalSize()
+	t, err := i.graphics.device.CreateTexture2D(&_D3D11_TEXTURE2D_DESC{
+		Width:      uint32(w),
+		Height:     uint32(h),
+		MipLevels:  1,
+		ArraySize:  1,
+		Format:     _DXGI_FORMAT_D24_UNORM_S8_UINT,
+		SampleDesc: _DXGI_SAMPLE_DESC{Count: 1},
+		Usage:      _D3D11_USAGE_DEFAULT,
+		BindFlags:  uint32(_D3D11_BIND_DEPTH_STENCIL),
+	}, nil)
+	if err != nil {
+		return nil, err
+	}
+	v, err := i.graphics.device.CreateDepthStencilView(unsafe.Pointer(t), nil)
+	if err != nil {
+		t.Release()
+		return nil, err
+	}
+	i.depthTexture = t
+	i.depthStencilView = v
+	return v, nil
 }
 
 func (i *image11) getShaderResourceView() (*_ID3D11ShaderResourceView, error) {

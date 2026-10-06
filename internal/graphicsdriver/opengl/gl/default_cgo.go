@@ -55,6 +55,13 @@ package gl
 //   ((fn)(fnptr))(target, framebuffer);
 // }
 //
+// #cgo noescape glowBindRenderbuffer
+// #cgo nocallback glowBindRenderbuffer
+// static void glowBindRenderbuffer(uintptr_t fnptr, GLenum target, GLuint renderbuffer) {
+//   typedef void (*fn)(GLenum target, GLuint renderbuffer);
+//   ((fn)(fnptr))(target, renderbuffer);
+// }
+//
 // #cgo noescape glowBindTexture
 // #cgo nocallback glowBindTexture
 // static void glowBindTexture(uintptr_t fnptr, GLenum target, GLuint texture) {
@@ -104,6 +111,13 @@ package gl
 //   return ((fn)(fnptr))(target);
 // }
 //
+// #cgo noescape glowClear
+// #cgo nocallback glowClear
+// static void glowClear(uintptr_t fnptr, GLbitfield mask) {
+//   typedef void (*fn)(GLbitfield mask);
+//   ((fn)(fnptr))(mask);
+// }
+//
 // #cgo noescape glowCompileShader
 // #cgo nocallback glowCompileShader
 // static void glowCompileShader(uintptr_t fnptr, GLuint shader) {
@@ -146,6 +160,13 @@ package gl
 //   ((fn)(fnptr))(program);
 // }
 //
+// #cgo noescape glowDeleteRenderbuffers
+// #cgo nocallback glowDeleteRenderbuffers
+// static void glowDeleteRenderbuffers(uintptr_t fnptr, GLsizei n, const GLuint* renderbuffers) {
+//   typedef void (*fn)(GLsizei n, const GLuint* renderbuffers);
+//   ((fn)(fnptr))(n, renderbuffers);
+// }
+//
 // #cgo noescape glowDeleteShader
 // #cgo nocallback glowDeleteShader
 // static void glowDeleteShader(uintptr_t fnptr, GLuint shader) {
@@ -165,6 +186,20 @@ package gl
 // static void glowDeleteVertexArrays(uintptr_t fnptr, GLsizei n, const GLuint* arrays) {
 //   typedef void (*fn)(GLsizei n, const GLuint* arrays);
 //   ((fn)(fnptr))(n, arrays);
+// }
+//
+// #cgo noescape glowDepthFunc
+// #cgo nocallback glowDepthFunc
+// static void glowDepthFunc(uintptr_t fnptr, GLenum func) {
+//   typedef void (*fn)(GLenum func);
+//   ((fn)(fnptr))(func);
+// }
+//
+// #cgo noescape glowDisable
+// #cgo nocallback glowDisable
+// static void glowDisable(uintptr_t fnptr, GLenum cap) {
+//   typedef void (*fn)(GLenum cap);
+//   ((fn)(fnptr))(cap);
 // }
 //
 // #cgo noescape glowDrawElements
@@ -209,6 +244,13 @@ package gl
 //   ((fn)(fnptr))();
 // }
 //
+// #cgo noescape glowFramebufferRenderbuffer
+// #cgo nocallback glowFramebufferRenderbuffer
+// static void glowFramebufferRenderbuffer(uintptr_t fnptr, GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer) {
+//   typedef void (*fn)(GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer);
+//   ((fn)(fnptr))(target, attachment, renderbuffertarget, renderbuffer);
+// }
+//
 // #cgo noescape glowFramebufferTexture2D
 // #cgo nocallback glowFramebufferTexture2D
 // static void glowFramebufferTexture2D(uintptr_t fnptr, GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level) {
@@ -228,6 +270,13 @@ package gl
 // static void glowGenFramebuffers(uintptr_t fnptr, GLsizei n, GLuint* framebuffers) {
 //   typedef void (*fn)(GLsizei n, GLuint* framebuffers);
 //   ((fn)(fnptr))(n, framebuffers);
+// }
+//
+// #cgo noescape glowGenRenderbuffers
+// #cgo nocallback glowGenRenderbuffers
+// static void glowGenRenderbuffers(uintptr_t fnptr, GLsizei n, GLuint* renderbuffers) {
+//   typedef void (*fn)(GLsizei n, GLuint* renderbuffers);
+//   ((fn)(fnptr))(n, renderbuffers);
 // }
 //
 // #cgo noescape glowGenTextures
@@ -319,6 +368,13 @@ package gl
 // static void glowReadPixels(uintptr_t fnptr, GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, void* pixels) {
 //   typedef void (*fn)(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, void* pixels);
 //   ((fn)(fnptr))(x, y, width, height, format, type, pixels);
+// }
+//
+// #cgo noescape glowRenderbufferStorage
+// #cgo nocallback glowRenderbufferStorage
+// static void glowRenderbufferStorage(uintptr_t fnptr, GLenum target, GLenum internalformat, GLsizei width, GLsizei height) {
+//   typedef void (*fn)(GLenum target, GLenum internalformat, GLsizei width, GLsizei height);
+//   ((fn)(fnptr))(target, internalformat, width, height);
 // }
 //
 // #cgo noescape glowScissor
@@ -480,6 +536,7 @@ type defaultContext struct {
 	gpBindAttribLocation      C.uintptr_t
 	gpBindBuffer              C.uintptr_t
 	gpBindFramebuffer         C.uintptr_t
+	gpBindRenderbuffer        C.uintptr_t
 	gpBindTexture             C.uintptr_t
 	gpBindVertexArray         C.uintptr_t
 	gpBlendEquationSeparate   C.uintptr_t
@@ -487,24 +544,30 @@ type defaultContext struct {
 	gpBufferData              C.uintptr_t
 	gpBufferSubData           C.uintptr_t
 	gpCheckFramebufferStatus  C.uintptr_t
+	gpClear                   C.uintptr_t
 	gpCompileShader           C.uintptr_t
 	gpCreateProgram           C.uintptr_t
 	gpCreateShader            C.uintptr_t
 	gpDeleteBuffers           C.uintptr_t
 	gpDeleteFramebuffers      C.uintptr_t
 	gpDeleteProgram           C.uintptr_t
+	gpDeleteRenderbuffers     C.uintptr_t
 	gpDeleteShader            C.uintptr_t
 	gpDeleteTextures          C.uintptr_t
 	gpDeleteVertexArrays      C.uintptr_t
+	gpDepthFunc               C.uintptr_t
+	gpDisable                 C.uintptr_t
 	gpDrawElements            C.uintptr_t
 	gpDrawElementsInstanced   C.uintptr_t
 	gpEnable                  C.uintptr_t
 	gpEnableVertexAttribArray C.uintptr_t
 	gpFinish                  C.uintptr_t
 	gpFlush                   C.uintptr_t
+	gpFramebufferRenderbuffer C.uintptr_t
 	gpFramebufferTexture2D    C.uintptr_t
 	gpGenBuffers              C.uintptr_t
 	gpGenFramebuffers         C.uintptr_t
+	gpGenRenderbuffers        C.uintptr_t
 	gpGenTextures             C.uintptr_t
 	gpGenVertexArrays         C.uintptr_t
 	gpGetError                C.uintptr_t
@@ -518,6 +581,7 @@ type defaultContext struct {
 	gpLinkProgram             C.uintptr_t
 	gpPixelStorei             C.uintptr_t
 	gpReadPixels              C.uintptr_t
+	gpRenderbufferStorage     C.uintptr_t
 	gpScissor                 C.uintptr_t
 	gpShaderSource            C.uintptr_t
 	gpTexImage2D              C.uintptr_t
@@ -587,6 +651,10 @@ func (c *defaultContext) BindFramebuffer(target uint32, framebuffer uint32) {
 	C.glowBindFramebuffer(c.gpBindFramebuffer, C.GLenum(target), C.GLuint(framebuffer))
 }
 
+func (c *defaultContext) BindRenderbuffer(target uint32, renderbuffer uint32) {
+	C.glowBindRenderbuffer(c.gpBindRenderbuffer, C.GLenum(target), C.GLuint(renderbuffer))
+}
+
 func (c *defaultContext) BindTexture(target uint32, texture uint32) {
 	C.glowBindTexture(c.gpBindTexture, C.GLenum(target), C.GLuint(texture))
 }
@@ -617,6 +685,10 @@ func (c *defaultContext) CheckFramebufferStatus(target uint32) uint32 {
 	return uint32(ret)
 }
 
+func (c *defaultContext) Clear(mask uint32) {
+	C.glowClear(c.gpClear, C.GLbitfield(mask))
+}
+
 func (c *defaultContext) CompileShader(shader uint32) {
 	C.glowCompileShader(c.gpCompileShader, C.GLuint(shader))
 }
@@ -636,6 +708,12 @@ func (c *defaultContext) CreateFramebuffer() uint32 {
 func (c *defaultContext) CreateProgram() uint32 {
 	ret := C.glowCreateProgram(c.gpCreateProgram)
 	return uint32(ret)
+}
+
+func (c *defaultContext) CreateRenderbuffer() uint32 {
+	var renderbuffer uint32
+	C.glowGenRenderbuffers(c.gpGenRenderbuffers, 1, (*C.GLuint)(unsafe.Pointer(&renderbuffer)))
+	return renderbuffer
 }
 
 func (c *defaultContext) CreateShader(xtype uint32) uint32 {
@@ -671,6 +749,10 @@ func (c *defaultContext) DeleteProgram(program uint32) {
 	C.glowDeleteProgram(c.gpDeleteProgram, C.GLuint(program))
 }
 
+func (c *defaultContext) DeleteRenderbuffer(renderbuffer uint32) {
+	C.glowDeleteRenderbuffers(c.gpDeleteRenderbuffers, 1, (*C.GLuint)(unsafe.Pointer(&renderbuffer)))
+}
+
 func (c *defaultContext) DeleteShader(shader uint32) {
 	C.glowDeleteShader(c.gpDeleteShader, C.GLuint(shader))
 }
@@ -681,6 +763,14 @@ func (c *defaultContext) DeleteTexture(texture uint32) {
 
 func (c *defaultContext) DeleteVertexArray(array uint32) {
 	C.glowDeleteVertexArrays(c.gpDeleteVertexArrays, 1, (*C.GLuint)(unsafe.Pointer(&array)))
+}
+
+func (c *defaultContext) DepthFunc(xfunc uint32) {
+	C.glowDepthFunc(c.gpDepthFunc, C.GLenum(xfunc))
+}
+
+func (c *defaultContext) Disable(cap uint32) {
+	C.glowDisable(c.gpDisable, C.GLenum(cap))
 }
 
 func (c *defaultContext) DrawElements(mode uint32, count int32, xtype uint32, offset int) {
@@ -705,6 +795,10 @@ func (c *defaultContext) Finish() {
 
 func (c *defaultContext) Flush() {
 	C.glowFlush(c.gpFlush)
+}
+
+func (c *defaultContext) FramebufferRenderbuffer(target uint32, attachment uint32, renderbuffertarget uint32, renderbuffer uint32) {
+	C.glowFramebufferRenderbuffer(c.gpFramebufferRenderbuffer, C.GLenum(target), C.GLenum(attachment), C.GLenum(renderbuffertarget), C.GLuint(renderbuffer))
 }
 
 func (c *defaultContext) FramebufferTexture2D(target uint32, attachment uint32, textarget uint32, texture uint32, level int32) {
@@ -781,6 +875,10 @@ func (c *defaultContext) PixelStorei(pname uint32, param int32) {
 func (c *defaultContext) ReadPixels(dst []byte, x int32, y int32, width int32, height int32, format uint32, xtype uint32) {
 	C.glowReadPixels(c.gpReadPixels, C.GLint(x), C.GLint(y), C.GLsizei(width), C.GLsizei(height), C.GLenum(format), C.GLenum(xtype), unsafe.Pointer(&dst[0]))
 	runtime.KeepAlive(dst)
+}
+
+func (c *defaultContext) RenderbufferStorage(target uint32, internalformat uint32, width int32, height int32) {
+	C.glowRenderbufferStorage(c.gpRenderbufferStorage, C.GLenum(target), C.GLenum(internalformat), C.GLsizei(width), C.GLsizei(height))
 }
 
 func (c *defaultContext) Scissor(x int32, y int32, width int32, height int32) {
@@ -894,6 +992,7 @@ func (c *defaultContext) LoadFunctions() error {
 	c.gpBindAttribLocation = C.uintptr_t(g.get("glBindAttribLocation"))
 	c.gpBindBuffer = C.uintptr_t(g.get("glBindBuffer"))
 	c.gpBindFramebuffer = C.uintptr_t(g.get("glBindFramebuffer"))
+	c.gpBindRenderbuffer = C.uintptr_t(g.get("glBindRenderbuffer"))
 	c.gpBindTexture = C.uintptr_t(g.get("glBindTexture"))
 	c.gpBindVertexArray = C.uintptr_t(g.get("glBindVertexArray"))
 	c.gpBlendEquationSeparate = C.uintptr_t(g.get("glBlendEquationSeparate"))
@@ -901,23 +1000,29 @@ func (c *defaultContext) LoadFunctions() error {
 	c.gpBufferData = C.uintptr_t(g.get("glBufferData"))
 	c.gpBufferSubData = C.uintptr_t(g.get("glBufferSubData"))
 	c.gpCheckFramebufferStatus = C.uintptr_t(g.get("glCheckFramebufferStatus"))
+	c.gpClear = C.uintptr_t(g.get("glClear"))
 	c.gpCompileShader = C.uintptr_t(g.get("glCompileShader"))
 	c.gpCreateProgram = C.uintptr_t(g.get("glCreateProgram"))
 	c.gpCreateShader = C.uintptr_t(g.get("glCreateShader"))
 	c.gpDeleteBuffers = C.uintptr_t(g.get("glDeleteBuffers"))
 	c.gpDeleteFramebuffers = C.uintptr_t(g.get("glDeleteFramebuffers"))
 	c.gpDeleteProgram = C.uintptr_t(g.get("glDeleteProgram"))
+	c.gpDeleteRenderbuffers = C.uintptr_t(g.get("glDeleteRenderbuffers"))
 	c.gpDeleteShader = C.uintptr_t(g.get("glDeleteShader"))
 	c.gpDeleteTextures = C.uintptr_t(g.get("glDeleteTextures"))
 	c.gpDeleteVertexArrays = C.uintptr_t(g.get("glDeleteVertexArrays"))
+	c.gpDepthFunc = C.uintptr_t(g.get("glDepthFunc"))
+	c.gpDisable = C.uintptr_t(g.get("glDisable"))
 	c.gpDrawElements = C.uintptr_t(g.get("glDrawElements"))
 	c.gpEnable = C.uintptr_t(g.get("glEnable"))
 	c.gpEnableVertexAttribArray = C.uintptr_t(g.get("glEnableVertexAttribArray"))
 	c.gpFinish = C.uintptr_t(g.get("glFinish"))
 	c.gpFlush = C.uintptr_t(g.get("glFlush"))
+	c.gpFramebufferRenderbuffer = C.uintptr_t(g.get("glFramebufferRenderbuffer"))
 	c.gpFramebufferTexture2D = C.uintptr_t(g.get("glFramebufferTexture2D"))
 	c.gpGenBuffers = C.uintptr_t(g.get("glGenBuffers"))
 	c.gpGenFramebuffers = C.uintptr_t(g.get("glGenFramebuffers"))
+	c.gpGenRenderbuffers = C.uintptr_t(g.get("glGenRenderbuffers"))
 	c.gpGenTextures = C.uintptr_t(g.get("glGenTextures"))
 	c.gpGenVertexArrays = C.uintptr_t(g.get("glGenVertexArrays"))
 	c.gpGetError = C.uintptr_t(g.get("glGetError"))
@@ -931,6 +1036,7 @@ func (c *defaultContext) LoadFunctions() error {
 	c.gpLinkProgram = C.uintptr_t(g.get("glLinkProgram"))
 	c.gpPixelStorei = C.uintptr_t(g.get("glPixelStorei"))
 	c.gpReadPixels = C.uintptr_t(g.get("glReadPixels"))
+	c.gpRenderbufferStorage = C.uintptr_t(g.get("glRenderbufferStorage"))
 	c.gpScissor = C.uintptr_t(g.get("glScissor"))
 	c.gpShaderSource = C.uintptr_t(g.get("glShaderSource"))
 	c.gpTexImage2D = C.uintptr_t(g.get("glTexImage2D"))

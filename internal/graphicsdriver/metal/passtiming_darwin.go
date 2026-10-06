@@ -80,6 +80,7 @@ func (p *passTimes) add(cb mtl.CommandBuffer, dst *Image) {
 			Dst:    dst.id,
 			Width:  dst.width,
 			Height: dst.height,
+			Depth:  dst.depth != (mtl.Texture{}),
 		},
 	})
 }

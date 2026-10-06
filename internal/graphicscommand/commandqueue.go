@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"image"
 	"math"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -208,7 +209,7 @@ func (q *commandQueue) EnqueueDrawTrianglesCommand(dst *Image, srcs [graphics.Sh
 }
 
 // EnqueueDrawMeshCommand enqueues a command to draw a mesh once for each instance record.
-func (q *commandQueue) EnqueueDrawMeshCommand(dst *Image, srcs [graphics.ShaderSrcImageCount]*Image, mesh *Mesh, instances []float32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32) {
+func (q *commandQueue) EnqueueDrawMeshCommand(dst *Image, srcs [graphics.ShaderSrcImageCount]*Image, mesh *Mesh, instances []float32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32, depth bool) {
 	q.instances = append(q.instances, instances...)
 	uniforms = q.prependPreservedUniforms(uniforms, shader, dst, srcs, dstRegion, srcRegions)
 	shader.ir.FilterUniformVariables(uniforms)
@@ -222,8 +223,20 @@ func (q *commandQueue) EnqueueDrawMeshCommand(dst *Image, srcs [graphics.ShaderS
 		blend:     blend,
 		shader:    shader,
 		uniforms:  uniforms,
+		depth:     depth,
 	}
 	q.commands = append(q.commands, c)
+}
+
+// depthDst returns the destination of a draw with the depth test, or nil.
+func depthDst(c command) *Image {
+	if c, ok := c.(*drawMeshCommand); ok && c.depth {
+		return c.dst
+	}
+	if c, ok := c.(*drawTrianglesCommand); ok && c.blend.DepthTest {
+		return c.dst
+	}
+	return nil
 }
 
 func (q *commandQueue) lastVertices(n int) []float32 {
@@ -377,9 +390,15 @@ func (q *commandQueue) flush(graphicsDriver graphicsdriver.Graphics, mode graphi
 			vs = vs[nv:]
 		}
 		var indexOffset int
-		for _, c := range cs[:nc] {
+		for i, c := range cs[:nc] {
 			if err := c.Exec(q, graphicsDriver, indexOffset); err != nil {
 				return err
+			}
+			// A depth buffer clears at its first use in a frame, so the last flush of a frame discards it after its last draw.
+			if dd, ok := graphicsDriver.(interface{ DiscardDepth(graphicsdriver.ImageID) }); ok && mode != graphicsdriver.FlushModeIntermediate {
+				if dst := depthDst(c); dst != nil && !slices.ContainsFunc(cs[i+1:], func(c command) bool { return depthDst(c) == dst }) {
+					dd.DiscardDepth(dst.image.ID())
+				}
 			}
 			if debug.IsDebug {
 				str := c.String()
@@ -657,11 +676,11 @@ func (c *commandQueueManager) enqueueDrawTrianglesCommand(dst *Image, srcs [grap
 	c.current.EnqueueDrawTrianglesCommand(dst, srcs, vertices, indices, blend, dstRegion, srcRegions, shader, uniforms)
 }
 
-func (c *commandQueueManager) enqueueDrawMeshCommand(dst *Image, srcs [graphics.ShaderSrcImageCount]*Image, mesh *Mesh, instances []float32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32) {
+func (c *commandQueueManager) enqueueDrawMeshCommand(dst *Image, srcs [graphics.ShaderSrcImageCount]*Image, mesh *Mesh, instances []float32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32, depth bool) {
 	if c.current == nil {
 		c.current = c.pool.get()
 	}
-	c.current.EnqueueDrawMeshCommand(dst, srcs, mesh, instances, blend, dstRegion, srcRegions, shader, uniforms)
+	c.current.EnqueueDrawMeshCommand(dst, srcs, mesh, instances, blend, dstRegion, srcRegions, shader, uniforms, depth)
 }
 
 func (c *commandQueueManager) flush(graphicsDriver graphicsdriver.Graphics, mode graphicsdriver.FlushMode) error {

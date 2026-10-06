@@ -526,7 +526,7 @@ func NewMesh(vertices []float32, indices []uint32) *graphicscommand.Mesh {
 }
 
 // DrawMesh draws the mesh once for each instance record.
-func (i *Image) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Image, mesh *graphicscommand.Mesh, instances []float32, blend graphicsdriver.Blend, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32) {
+func (i *Image) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Image, mesh *graphicscommand.Mesh, instances []float32, blend graphicsdriver.Blend, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32, depth bool) {
 	backendsM.Lock()
 	defer backendsM.Unlock()
 
@@ -572,7 +572,7 @@ func (i *Image) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Image, mesh *graphi
 	}
 
 	// An unmanaged image is not on an atlas, so its region starts at (0, 0).
-	i.backend.backendImage.DrawMesh(imgs, mesh, instances, blend, image.Rect(0, 0, i.width, i.height), srcRegions, shader.ensureShader(), uniforms)
+	i.backend.backendImage.DrawMesh(imgs, mesh, instances, blend, image.Rect(0, 0, i.width, i.height), srcRegions, shader.ensureShader(), uniforms, depth)
 }
 
 // WritePixels replaces the pixels on the image.

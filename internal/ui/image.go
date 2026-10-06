@@ -173,7 +173,7 @@ func (i *Image) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 }
 
 // DrawMesh draws the mesh once for each instance record.
-func (i *Image) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Image, mesh *graphicscommand.Mesh, instances []float32, blend graphicsdriver.Blend, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32) {
+func (i *Image) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Image, mesh *graphicscommand.Mesh, instances []float32, blend graphicsdriver.Blend, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32, depth bool) {
 	var l imagesLocker
 	l.lock(i, srcs)
 	defer l.unlock()
@@ -190,7 +190,7 @@ func (i *Image) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Image, mesh *graphi
 			srcMipmaps[i] = src.mipmap
 		}
 	}
-	i.mipmap.DrawMesh(srcMipmaps, mesh, instances, blend, srcRegions, shader.shader, uniforms)
+	i.mipmap.DrawMesh(srcMipmaps, mesh, instances, blend, srcRegions, shader.shader, uniforms, depth)
 }
 
 // IsMeshDrawingSupported reports whether the graphics driver can draw a mesh with instances.

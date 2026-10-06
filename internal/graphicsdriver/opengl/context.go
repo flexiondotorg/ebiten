@@ -81,11 +81,12 @@ func convertBlendOperation(o graphicsdriver.BlendOperation) blendOperation {
 }
 
 type (
-	textureNative     uint32
-	framebufferNative uint32
-	shader            uint32
-	program           uint32
-	buffer            uint32
+	textureNative      uint32
+	renderbufferNative uint32
+	framebufferNative  uint32
+	shader             uint32
+	program            uint32
+	buffer             uint32
 )
 
 type (
@@ -103,6 +104,7 @@ type context struct {
 	locationCache                   *locationCache
 	screenFramebuffer               framebufferNative // This might not be the default frame buffer '0' (e.g. iOS).
 	lastFramebuffer                 framebufferNative
+	lastRenderbuffer                renderbufferNative
 	lastTextures                    [graphics.ShaderSrcImageCount]textureNative // The texture bound to each texture unit.
 	lastActiveTexture               int
 	lastViewportWidth               int
@@ -130,6 +132,14 @@ func (c *context) bindTextureToUnit(idx int, t textureNative) {
 	}
 	c.ctx.BindTexture(gl.TEXTURE_2D, uint32(t))
 	c.lastTextures[idx] = t
+}
+
+func (c *context) bindRenderbuffer(r renderbufferNative) {
+	if c.lastRenderbuffer == r {
+		return
+	}
+	c.ctx.BindRenderbuffer(gl.RENDERBUFFER, uint32(r))
+	c.lastRenderbuffer = r
 }
 
 func (c *context) bindFramebuffer(f framebufferNative) {
@@ -274,6 +284,13 @@ func (c *context) deleteTexture(t textureNative) {
 		}
 	}
 	c.ctx.DeleteTexture(uint32(t))
+}
+
+func (c *context) deleteRenderbuffer(r renderbufferNative) {
+	if c.lastRenderbuffer == r {
+		c.lastRenderbuffer = 0
+	}
+	c.ctx.DeleteRenderbuffer(uint32(r))
 }
 
 func (c *context) newFramebuffer(texture textureNative, width, height int) (*framebuffer, error) {

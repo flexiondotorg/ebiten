@@ -203,7 +203,7 @@ func (p *pipelineStates) drawTriangles(device *_ID3D12Device, commandList *_ID3D
 		return err
 	}
 
-	s, err := shader.pipelineState(blend, screen)
+	s, err := shader.pipelineState(blend, screen, blend.DepthTest)
 	if err != nil {
 		return err
 	}
@@ -396,8 +396,9 @@ func (p *pipelineStates) ensureRootSignature(device *_ID3D12Device) (*_ID3D12Roo
 	return p.rootSignature, nil
 }
 
-// newPipelineState makes a pipeline state. With mesh, it takes the input layout of a mesh draw, which is untested.
-func (p *pipelineStates) newPipelineState(device *_ID3D12Device, vsh, psh *_ID3DBlob, blend graphicsdriver.Blend, screen bool, mesh bool) (*_ID3D12PipelineState, error) {
+// newPipelineState makes a pipeline state. With mesh, it takes the input layout of a mesh draw, and with depth,
+// the depth test and the depth writes, which are untested.
+func (p *pipelineStates) newPipelineState(device *_ID3D12Device, vsh, psh *_ID3DBlob, blend graphicsdriver.Blend, screen bool, mesh bool, depth bool) (*_ID3D12PipelineState, error) {
 	rootSignature, err := p.ensureRootSignature(device)
 	if err != nil {
 		return nil, err
@@ -472,6 +473,25 @@ func (p *pipelineStates) newPipelineState(device *_ID3D12Device, vsh, psh *_ID3D
 			Count:   1,
 			Quality: 0,
 		},
+	}
+
+	if depth {
+		keep := _D3D12_DEPTH_STENCILOP_DESC{
+			StencilFailOp:      _D3D12_STENCIL_OP_KEEP,
+			StencilDepthFailOp: _D3D12_STENCIL_OP_KEEP,
+			StencilPassOp:      _D3D12_STENCIL_OP_KEEP,
+			StencilFunc:        _D3D12_COMPARISON_FUNC_ALWAYS,
+		}
+		psoDesc.DepthStencilState = _D3D12_DEPTH_STENCIL_DESC{
+			DepthEnable:      1,
+			DepthWriteMask:   _D3D12_DEPTH_WRITE_MASK_ALL,
+			DepthFunc:        _D3D12_COMPARISON_FUNC_LESS_EQUAL,
+			StencilReadMask:  0xff,
+			StencilWriteMask: 0xff,
+			FrontFace:        keep,
+			BackFace:         keep,
+		}
+		psoDesc.DSVFormat = _DXGI_FORMAT_D24_UNORM_S8_UINT
 	}
 
 	s, err := device.CreateGraphicsPipelineState(&psoDesc)
