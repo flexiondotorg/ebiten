@@ -5101,6 +5101,73 @@ func Fragment(dstPos vec4, src0Pos vec2, color vec4) vec4 {
 	}
 }
 
+func TestImageDrawTrianglesShader32WithOrigins(t *testing.T) {
+	const w, h = 32, 32
+
+	// The pixel at (x, y) of src has the red (x-10)*8 and the green (y-10)*8.
+	src := ebiten.NewImageWithOptions(image.Rect(10, 10, 10+w, 10+h), nil)
+	pix := make([]byte, 4*w*h)
+	for j := range h {
+		for i := range w {
+			pix[4*(j*w+i)] = byte(i) * 8
+			pix[4*(j*w+i)+1] = byte(j) * 8
+			pix[4*(j*w+i)+3] = 0xff
+		}
+	}
+	src.WritePixels(pix)
+
+	parent := ebiten.NewImageWithOptions(image.Rect(-8, -8, -8+w, -8+h), nil)
+
+	shader, err := ebiten.NewShader([]byte(`//kage:unit pixels
+
+package main
+
+func Fragment(dstPos vec4, src0Pos vec2, color vec4, custom vec4) vec4 {
+	c := imageSrc0At(src0Pos)
+	return vec4(c.r, c.g, custom.x, color.a)
+}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, sub := range []bool{false, true} {
+		parent.Clear()
+		dst := parent
+		s := src
+		if sub {
+			dst = parent.SubImage(image.Rect(-4, -2, 12, 14)).(*ebiten.Image)
+			s = src.SubImage(image.Rect(12, 13, 28, 29)).(*ebiten.Image)
+		}
+
+		// The positions are in the coordinates of the images, whose origins are not (0, 0).
+		// The other values must reach the shader as they are.
+		vs := []ebiten.Vertex{
+			{DstX: -4, DstY: -2, SrcX: 12, SrcY: 13, ColorA: 1, Custom0: 0.5},
+			{DstX: 12, DstY: -2, SrcX: 28, SrcY: 13, ColorA: 1, Custom0: 0.5},
+			{DstX: -4, DstY: 14, SrcX: 12, SrcY: 29, ColorA: 1, Custom0: 0.5},
+			{DstX: 12, DstY: 14, SrcX: 28, SrcY: 29, ColorA: 1, Custom0: 0.5},
+		}
+		is := []uint32{0, 1, 2, 1, 2, 3}
+		op := &ebiten.DrawTrianglesShaderOptions{}
+		op.Images[0] = s
+		dst.DrawTrianglesShader32(vs, is, shader, op)
+
+		for j := -8; j < -8+h; j++ {
+			for i := -8; i < -8+w; i++ {
+				got := parent.At(i, j).(color.RGBA)
+				var want color.RGBA
+				if -4 <= i && i < 12 && -2 <= j && j < 14 {
+					want = color.RGBA{R: byte(i+16-10) * 8, G: byte(j+15-10) * 8, B: 0x80, A: 0xff}
+				}
+				if !sameColors(got, want, 1) {
+					t.Errorf("sub-image: %t: parent.At(%d, %d): got %v, want: %v", sub, i, j, got, want)
+				}
+			}
+		}
+	}
+}
+
 // Issue #3267
 func TestSubImageRaceConditionWithFill(t *testing.T) {
 	const w, h = 16, 16
