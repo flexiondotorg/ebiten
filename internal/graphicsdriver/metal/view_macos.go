@@ -200,5 +200,5 @@ func (v *view) presentDrawable(cb mtl.CommandBuffer, d ca.MetalDrawable) {
 		d.AddPresentedHandler(v.presentedHandler)
 	}
 	v.lastPresentTime = time.Now()
-	cb.PresentDrawable(d)
+	cb.PresentDrawablePointer(d.Drawable())
 }

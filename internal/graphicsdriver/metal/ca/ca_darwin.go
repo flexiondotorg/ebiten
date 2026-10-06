@@ -31,6 +31,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/internal/cocoa"
 	"github.com/hajimehoshi/ebiten/v2/internal/color"
 	"github.com/hajimehoshi/ebiten/v2/internal/graphicsdriver/metal/mtl"
+	"github.com/hajimehoshi/ebiten/v2/internal/objcutil"
 )
 
 var (
@@ -75,7 +76,7 @@ var (
 //
 // Reference: https://developer.apple.com/documentation/quartzcore/catransaction/1448270-flush.
 func FlushTransaction() {
-	objc.ID(class_CATransaction).Send(sel_flush)
+	objcutil.Send(objc.ID(class_CATransaction), sel_flush)
 }
 
 // Layer is an object that manages image-based content and
@@ -219,7 +220,7 @@ func (ml MetalLayer) SetDrawableSize(width, height int) {
 //
 // Reference: https://developer.apple.com/documentation/quartzcore/cametallayer/1478172-nextdrawable?language=objc.
 func (ml MetalLayer) NextDrawable() (MetalDrawable, error) {
-	md := ml.metalLayer.Send(sel_nextDrawable)
+	md := objc.ID(objcutil.Send(ml.metalLayer, sel_nextDrawable))
 	if md == 0 {
 		return MetalDrawable{}, errors.New("nextDrawable returned nil")
 	}
@@ -256,12 +257,12 @@ type MetalDrawable struct {
 
 // Retain increments the drawable's reference count.
 func (md MetalDrawable) Retain() {
-	md.metalDrawable.Send(sel_retain)
+	objcutil.Send(md.metalDrawable, sel_retain)
 }
 
 // Release decrements the drawable's reference count.
 func (md MetalDrawable) Release() {
-	md.metalDrawable.Send(sel_release)
+	objcutil.Send(md.metalDrawable, sel_release)
 }
 
 // Drawable implements the mtl.Drawable interface.
@@ -273,21 +274,21 @@ func (md MetalDrawable) Drawable() unsafe.Pointer {
 //
 // Reference: https://developer.apple.com/documentation/quartzcore/cametaldrawable/1478159-texture?language=objc.
 func (md MetalDrawable) Texture() mtl.Texture {
-	return mtl.NewTexture(md.metalDrawable.Send(sel_texture))
+	return mtl.NewTexture(objc.ID(objcutil.Send(md.metalDrawable, sel_texture)))
 }
 
 // Present presents the drawable onscreen as soon as possible.
 //
 // Reference: https://developer.apple.com/documentation/metal/mtldrawable/1470284-present?language=objc.
 func (md MetalDrawable) Present() {
-	md.metalDrawable.Send(sel_present)
+	objcutil.Send(md.metalDrawable, sel_present)
 }
 
 // AddPresentedHandler registers a block of code to be called immediately after the drawable is presented.
 //
 // Reference: https://developer.apple.com/documentation/metal/mtldrawable/2806858-addpresentedhandler?language=objc.
 func (md MetalDrawable) AddPresentedHandler(block objc.Block) {
-	md.metalDrawable.Send(sel_addPresentedHandler, block)
+	objcutil.Send(md.metalDrawable, sel_addPresentedHandler, uintptr(block))
 }
 
 // CanAddPresentedHandler reports whether AddPresentedHandler is available.
@@ -360,5 +361,5 @@ type MetalDisplayLinkUpdate struct {
 //
 // https://developer.apple.com/documentation/quartzcore/cametaldisplaylink/update/drawable?language=objc
 func (m MetalDisplayLinkUpdate) Drawable() MetalDrawable {
-	return MetalDrawable{m.Send(sel_drawable)}
+	return MetalDrawable{objc.ID(objcutil.Send(m.ID, sel_drawable))}
 }

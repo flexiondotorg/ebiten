@@ -772,7 +772,7 @@ func (cq CommandQueue) Release() {
 //
 // Reference: https://developer.apple.com/documentation/metal/mtlcommandqueue/1508686-commandbuffer?language=objc.
 func (cq CommandQueue) CommandBuffer() (CommandBuffer, error) {
-	cb := cq.commandQueue.Send(sel_commandBuffer)
+	cb := objc.ID(objcutil.Send(cq.commandQueue, sel_commandBuffer))
 	if cb == 0 {
 		return CommandBuffer{}, errors.New("mtl: commandBuffer returned nil")
 	}
@@ -788,46 +788,52 @@ type CommandBuffer struct {
 }
 
 func (cb CommandBuffer) Retain() {
-	cb.commandBuffer.Send(sel_retain)
+	objcutil.Send(cb.commandBuffer, sel_retain)
 }
 
 func (cb CommandBuffer) Release() {
-	cb.commandBuffer.Send(sel_release)
+	objcutil.Send(cb.commandBuffer, sel_release)
 }
 
 // Status returns the current stage in the lifetime of the command buffer.
 //
 // Reference: https://developer.apple.com/documentation/metal/mtlcommandbuffer/1443048-status?language=objc.
 func (cb CommandBuffer) Status() CommandBufferStatus {
-	return CommandBufferStatus(cb.commandBuffer.Send(sel_status))
+	return CommandBufferStatus(objcutil.Send(cb.commandBuffer, sel_status))
 }
 
 // PresentDrawable registers a drawable presentation to occur as soon as possible.
 //
 // Reference: https://developer.apple.com/documentation/metal/mtlcommandbuffer/1443029-presentdrawable?language=objc.
 func (cb CommandBuffer) PresentDrawable(d Drawable) {
-	cb.commandBuffer.Send(sel_presentDrawable, d.Drawable())
+	cb.PresentDrawablePointer(d.Drawable())
+}
+
+// PresentDrawablePointer registers a drawable presentation to occur as soon as possible, given the
+// pointer of the drawable. Unlike PresentDrawable, it takes no interface value, so it does not allocate.
+func (cb CommandBuffer) PresentDrawablePointer(d unsafe.Pointer) {
+	objcutil.Send(cb.commandBuffer, sel_presentDrawable, uintptr(d))
 }
 
 // Commit commits this command buffer for execution as soon as possible.
 //
 // Reference: https://developer.apple.com/documentation/metal/mtlcommandbuffer/1443003-commit?language=objc.
 func (cb CommandBuffer) Commit() {
-	cb.commandBuffer.Send(sel_commit)
+	objcutil.Send(cb.commandBuffer, sel_commit)
 }
 
 // WaitUntilCompleted waits for the execution of this command buffer to complete.
 //
 // Reference: https://developer.apple.com/documentation/metal/mtlcommandbuffer/1443039-waituntilcompleted?language=objc.
 func (cb CommandBuffer) WaitUntilCompleted() {
-	cb.commandBuffer.Send(sel_waitUntilCompleted)
+	objcutil.Send(cb.commandBuffer, sel_waitUntilCompleted)
 }
 
 // WaitUntilScheduled blocks execution of the current thread until the command buffer is scheduled.
 //
 // Reference: https://developer.apple.com/documentation/metal/mtlcommandbuffer/1443036-waituntilscheduled?language=objc.
 func (cb CommandBuffer) WaitUntilScheduled() {
-	cb.commandBuffer.Send(sel_waitUntilScheduled)
+	objcutil.Send(cb.commandBuffer, sel_waitUntilScheduled)
 }
 
 // RenderCommandEncoderWithDescriptor creates a render command encoder from a descriptor.
@@ -899,7 +905,7 @@ type CommandEncoder struct {
 //
 // Reference: https://developer.apple.com/documentation/metal/mtlcommandencoder/1458038-endencoding?language=objc.
 func (ce CommandEncoder) EndEncoding() {
-	ce.commandEncoder.Send(sel_endEncoding)
+	objcutil.Send(ce.commandEncoder, sel_endEncoding)
 }
 
 // RenderCommandEncoder is an encoder that specifies graphics-rendering commands
@@ -1062,7 +1068,7 @@ func (t Texture) resource() unsafe.Pointer {
 }
 
 func (t Texture) Release() {
-	t.texture.Send(sel_release)
+	objcutil.Send(t.texture, sel_release)
 }
 
 // checkPixelsForTransfer returns an error unless pixels is large enough for transferring region with bytesPerRow.
@@ -1110,14 +1116,14 @@ func (t Texture) ReplaceRegion(region Region, level int, pixels []byte, bytesPer
 //
 // Reference: https://developer.apple.com/documentation/metal/mtltexture/1515339-width?language=objc.
 func (t Texture) Width() int {
-	return int(t.texture.Send(sel_width))
+	return int(objcutil.Send(t.texture, sel_width))
 }
 
 // Height is the height of the texture image for the base level mipmap, in pixels.
 //
 // Reference: https://developer.apple.com/documentation/metal/mtltexture/1515938-height?language=objc.
 func (t Texture) Height() int {
-	return int(t.texture.Send(sel_height))
+	return int(objcutil.Send(t.texture, sel_height))
 }
 
 // Buffer is a memory allocation for storing unformatted data
@@ -1154,7 +1160,7 @@ func (b Buffer) Retain() {
 }
 
 func (b Buffer) Release() {
-	b.buffer.Send(sel_release)
+	objcutil.Send(b.buffer, sel_release)
 }
 
 // Function represents a programmable graphics or compute function executed by the GPU.

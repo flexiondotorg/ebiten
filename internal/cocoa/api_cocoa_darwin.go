@@ -21,6 +21,8 @@ import (
 	"github.com/ebitengine/purego"
 	"github.com/ebitengine/purego/cstrings"
 	"github.com/ebitengine/purego/objc"
+
+	"github.com/hajimehoshi/ebiten/v2/internal/objcutil"
 )
 
 var (
@@ -151,7 +153,7 @@ type NSWindow struct {
 }
 
 func (w NSWindow) StyleMask() NSUInteger {
-	return NSUInteger(w.Send(sel_styleMask))
+	return NSUInteger(objcutil.Send(w.ID, sel_styleMask))
 }
 
 func (w NSWindow) SetStyleMask(styleMask NSUInteger) {
@@ -167,7 +169,7 @@ func (w NSWindow) OcclusionState() NSUInteger {
 }
 
 func (w NSWindow) InLiveResize() bool {
-	return w.Send(sel_inLiveResize) != 0
+	return objcutil.Send(w.ID, sel_inLiveResize)&0xff != 0
 }
 
 func (w NSWindow) Screen() NSScreen {
@@ -209,11 +211,11 @@ type NSAutoreleasePool struct {
 }
 
 func NSAutoreleasePool_new() NSAutoreleasePool {
-	return NSAutoreleasePool{objc.ID(class_NSAutoreleasePool).Send(sel_new)}
+	return NSAutoreleasePool{objc.ID(objcutil.Send(objc.ID(class_NSAutoreleasePool), sel_new))}
 }
 
 func (p NSAutoreleasePool) Release() {
-	p.Send(sel_release)
+	objcutil.Send(p.ID, sel_release)
 }
 
 type NSString struct {
