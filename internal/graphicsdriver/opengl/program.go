@@ -22,6 +22,7 @@ import (
 	"unsafe"
 
 	"github.com/hajimehoshi/ebiten/v2/internal/graphics"
+	"github.com/hajimehoshi/ebiten/v2/internal/graphicsdriver"
 	"github.com/hajimehoshi/ebiten/v2/internal/graphicsdriver/opengl/gl"
 	"github.com/hajimehoshi/ebiten/v2/internal/shaderir"
 )
@@ -132,6 +133,17 @@ type openGLState struct {
 	elementArrayBuffer buffer
 
 	elementArrayBufferSizeInBytes int
+
+	// instanceBuffer holds the instance records of a mesh draw. instanceBufferGeneration counts the
+	// instance buffers, as a new buffer can take the name of a deleted one.
+	instanceBuffer           buffer
+	instanceBufferGeneration uint64
+
+	// meshes holds the vertices and the indices of each mesh on the GPU.
+	meshes map[graphicsdriver.MeshID]*mesh
+
+	// meshDraw is the state that the last mesh draw leaves.
+	meshDraw meshDrawState
 
 	lastProgram  program
 	lastUniforms uniformCache
@@ -244,12 +256,23 @@ func (s *openGLState) reset(context *context) error {
 	if s.vertexArray != 0 {
 		context.ctx.DeleteVertexArray(s.vertexArray)
 	}
+	if s.instanceBuffer != 0 {
+		context.ctx.DeleteBuffer(uint32(s.instanceBuffer))
+	}
+	for _, m := range s.meshes {
+		context.ctx.DeleteVertexArray(m.vertexArray)
+		context.ctx.DeleteBuffer(uint32(m.vertexBuffer))
+		context.ctx.DeleteBuffer(uint32(m.indexBuffer))
+	}
+	clear(s.meshes)
 
 	s.arrayBuffer = 0
 	s.arrayBufferSizeInBytes = 0
 	s.elementArrayBuffer = 0
 	s.elementArrayBufferSizeInBytes = 0
 	s.vertexArray = 0
+	s.instanceBuffer = 0
+	s.meshDraw = meshDrawState{}
 
 	return nil
 }

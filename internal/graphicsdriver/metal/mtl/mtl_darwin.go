@@ -530,6 +530,7 @@ var (
 	sel_setFragmentTexture_atIndex                                                                                                                 = objc.RegisterName("setFragmentTexture:atIndex:")
 	sel_drawPrimitives_vertexStart_vertexCount                                                                                                     = objc.RegisterName("drawPrimitives:vertexStart:vertexCount:")
 	sel_drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferOffset                                                                   = objc.RegisterName("drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:")
+	sel_drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferOffset_instanceCount                                                     = objc.RegisterName("drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:")
 	sel_synchronizeResource                                                                                                                        = objc.RegisterName("synchronizeResource:")
 	sel_copyFromBuffer_sourceOffset_sourceBytesPerRow_sourceBytesPerImage_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin = objc.RegisterName("copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:")
 	sel_copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage = objc.RegisterName("copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toBuffer:destinationOffset:destinationBytesPerRow:destinationBytesPerImage:")
@@ -1100,6 +1101,15 @@ func (rce RenderCommandEncoder) DrawIndexedPrimitives(typ PrimitiveType, indexCo
 		uintptr(typ), uintptr(indexCount), uintptr(indexType), uintptr(indexBuffer.buffer), uintptr(indexBufferOffset))
 }
 
+// DrawIndexedPrimitivesInstanced encodes a command to render a number of instances of primitives using an index list specified in a buffer.
+//
+// Reference: https://developer.apple.com/documentation/metal/mtlrendercommandencoder/drawindexedprimitives(type:indexcount:indextype:indexbuffer:indexbufferoffset:instancecount:)?language=objc.
+func (rce RenderCommandEncoder) DrawIndexedPrimitivesInstanced(typ PrimitiveType, indexCount int, indexType IndexType, indexBuffer Buffer, indexBufferOffset int, instanceCount int) {
+	objcutil.Send(rce.commandEncoder,
+		sel_drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferOffset_instanceCount,
+		uintptr(typ), uintptr(indexCount), uintptr(indexType), uintptr(indexBuffer.buffer), uintptr(indexBufferOffset), uintptr(instanceCount))
+}
+
 // BlitCommandEncoder is an encoder that specifies resource copy
 // and resource synchronization commands.
 //
@@ -1255,12 +1265,28 @@ func CopyToBufferAt[T byte | uint32 | float32](b Buffer, data []T, offset uintpt
 	if l := b.Length(); offset > l || size > l-offset {
 		panic(fmt.Sprintf("mtl: data (offset: %d, length: %d) does not fit in the buffer (length: %d)", offset, size, l))
 	}
+	copy(unsafe.Slice((*byte)(unsafe.Add(b.Contents(), offset)), size), unsafe.Slice((*byte)(unsafe.Pointer(&data[0])), size))
+	b.DidModifyRange(offset, size)
+}
+
+// Contents returns the address of the contents of the buffer. The address does not change.
+//
+// Reference: https://developer.apple.com/documentation/metal/mtlbuffer/contents()?language=objc.
+func (b Buffer) Contents() unsafe.Pointer {
 	contents := objcutil.Send(b.buffer, sel_contents)
-	copy(unsafe.Slice((*byte)(unsafe.Add(*(*unsafe.Pointer)(unsafe.Pointer(&contents)), offset)), size), unsafe.Slice((*byte)(unsafe.Pointer(&data[0])), size))
-	if runtime.GOOS != "ios" {
-		// The argument is an NSRange of the location and the length, which travels in two integer registers.
-		objcutil.Send(b.buffer, sel_didModifyRange, offset, size)
+	return *(*unsafe.Pointer)(unsafe.Pointer(&contents))
+}
+
+// DidModifyRange informs the GPU that the CPU has modified a range of a managed buffer. It does
+// nothing on iOS.
+//
+// Reference: https://developer.apple.com/documentation/metal/mtlbuffer/didmodifyrange(_:)?language=objc.
+func (b Buffer) DidModifyRange(location, length uintptr) {
+	if runtime.GOOS == "ios" {
+		return
 	}
+	// The argument is an NSRange of the location and the length, which travels in two integer registers.
+	objcutil.Send(b.buffer, sel_didModifyRange, location, length)
 }
 
 // CopyFromBufferAt copies the buffer's contents starting at offset, in bytes, into data.
