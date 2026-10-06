@@ -182,23 +182,30 @@ func (v *view) presentDrawableWithTransaction(cb mtl.CommandBuffer, d ca.MetalDr
 
 // presentDrawable registers the drawable presentation on the command buffer.
 func (v *view) presentDrawable(cb mtl.CommandBuffer, d ca.MetalDrawable) {
-	// Track the number of drawables queued for presentation. While vsync is disabled, nextDrawable
-	// uses the count to skip a frame instead of blocking until a drawable is available.
-	// updatePresentationState uses the count to wait until all the queued presentations
-	// finish before switching to transaction-synced presentation.
-	v.presentedHandlerOnce.Do(func() {
-		// addPresentedHandler is available as of macOS 10.15.4.
-		if !d.CanAddPresentedHandler() {
-			return
-		}
-		v.presentedHandler = objc.NewBlock(func(block objc.Block, drawable objc.ID) {
-			v.queuedPresents.Add(-1)
-		})
-	})
-	if v.presentedHandler != 0 {
-		v.queuedPresents.Add(1)
-		d.AddPresentedHandler(v.presentedHandler)
+	// Track the drawables queued for presentation (see queuedPresents). Release the shown drawables
+	// first, so that the queue stays short while vsync is enabled and nothing else reads the count.
+	if !v.presentsChecked {
+		v.presentsChecked = true
+		v.trackPresents = d.CanReportPresented()
+	}
+	if v.trackPresents {
+		v.queuedPresents()
+		d.Retain()
+		v.presents.push(d, ca.MetalDrawable.Release)
 	}
 	v.lastPresentTime = time.Now()
 	cb.PresentDrawablePointer(d.Drawable())
+}
+
+// queuedPresents returns the number of drawables that are queued for presentation and not shown yet,
+// and releases the drawables that are shown or dropped.
+//
+// While vsync is disabled, nextDrawable uses the count to skip a frame instead of blocking until a
+// drawable is available. updatePresentationState uses the count to wait until all the queued
+// presentations finish before switching to transaction-synced presentation.
+//
+// The presented time of each drawable replaces a presented handler, which Core Animation calls on its
+// own thread through a Go callback that allocates at each present.
+func (v *view) queuedPresents() int {
+	return v.presents.update(ca.MetalDrawable.Presented, ca.MetalDrawable.Release)
 }

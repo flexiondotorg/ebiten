@@ -70,6 +70,9 @@ var (
 	sel_addPresentedHandler        = objc.RegisterName("addPresentedHandler:")
 	sel_respondsToSelector         = objc.RegisterName("respondsToSelector:")
 	sel_flush                      = objc.RegisterName("flush")
+	sel_valueForKey                = objc.RegisterName("valueForKey:")
+	sel_boolValue                  = objc.RegisterName("boolValue")
+	sel_presentedTime              = objc.RegisterName("presentedTime")
 )
 
 // FlushTransaction commits any extant implicit Core Animation transaction on the calling thread.
@@ -289,6 +292,24 @@ func (md MetalDrawable) Present() {
 // Reference: https://developer.apple.com/documentation/metal/mtldrawable/2806858-addpresentedhandler?language=objc.
 func (md MetalDrawable) AddPresentedHandler(block objc.Block) {
 	objcutil.Send(md.metalDrawable, sel_addPresentedHandler, uintptr(block))
+}
+
+// key_presentedTime is the key of the presented time of a drawable, for Presented.
+var key_presentedTime = cocoa.NSString_alloc().InitWithUTF8String("presentedTime")
+
+// Presented reports whether the drawable is shown on the display: its presented time is not 0.
+// Key-value coding returns the time, a double, as an autoreleased NSNumber, because objcutil.Send
+// cannot return a double, and a function that can allocates at each call.
+//
+// Reference: https://developer.apple.com/documentation/metal/mtldrawable/presentedtime?language=objc.
+func (md MetalDrawable) Presented() bool {
+	n := objc.ID(objcutil.Send(md.metalDrawable, sel_valueForKey, uintptr(key_presentedTime.ID)))
+	return n != 0 && byte(objcutil.Send(n, sel_boolValue)) != 0
+}
+
+// CanReportPresented reports whether Presented is available, as of macOS 10.15.4.
+func (md MetalDrawable) CanReportPresented() bool {
+	return byte(objcutil.Send(md.metalDrawable, sel_respondsToSelector, uintptr(sel_presentedTime))) != 0
 }
 
 // CanAddPresentedHandler reports whether AddPresentedHandler is available.

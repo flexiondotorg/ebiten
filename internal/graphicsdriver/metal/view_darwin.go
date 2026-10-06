@@ -61,20 +61,16 @@ type view struct {
 	caDisplayLink    uintptr
 	metalDisplayLink uintptr
 
-	// queuedPresents is the number of drawables that are queued for presentation and not presented yet.
-	// While vsync is disabled on macOS, this is used to skip a frame instead of blocking until a
-	// drawable is available (see nextDrawable). This is also used to wait for all the queued
+	// presents holds the drawables that are queued for presentation and not known to be shown, retained.
+	// While vsync is disabled on macOS, the count is used to skip a frame instead of blocking until a
+	// drawable is available (see nextDrawable). It is also used to wait for all the queued
 	// presentations before switching to transaction-synced presentation (see updatePresentationState).
-	// queuedPresents is incremented on the rendering thread and decremented on Metal's presentation thread.
-	queuedPresents atomic.Int32
+	// presents is used only on the rendering thread, and only on macOS.
+	presents presentQueue[ca.MetalDrawable]
 
-	// presentedHandler is the handler called when a drawable is presented.
-	// presentedHandler is created at most once and reused for all the drawables.
-	// A zero presentedHandler means the handler is not created yet or not available.
-	presentedHandler objc.Block
-
-	// presentedHandlerOnce guards the creation of presentedHandler.
-	presentedHandlerOnce sync.Once
+	// presentsChecked reports whether trackPresents is set. trackPresents reports whether a drawable
+	// reports its presented time, which is available as of macOS 10.15.4.
+	presentsChecked, trackPresents bool
 
 	// lastPresentTime is the last time when a drawable presentation was registered on a command buffer.
 	lastPresentTime time.Time

@@ -359,7 +359,7 @@ func (v *view) updatePresentationState() {
 			// Wait until all the drawables queued for asynchronous presentation are presented.
 			// Otherwise, a pending presentation can replace the layer content after the first
 			// transaction-synced presentation, and a stale frame is shown for a moment.
-			for start := time.Now(); v.queuedPresents.Load() > 0 && time.Since(start) < 100*time.Millisecond; {
+			for start := time.Now(); v.queuedPresents() > 0 && time.Since(start) < 100*time.Millisecond; {
 				time.Sleep(time.Millisecond)
 			}
 		}
@@ -416,9 +416,9 @@ func (v *view) nextDrawable() ca.MetalDrawable {
 	// While vsync is disabled, getting a drawable must not block until one is available.
 	// When all the drawables but the one on the display are queued for presentation,
 	// skip the frame instead of blocking. The time condition is a fallback to keep presenting
-	// even when the tracking is stuck e.g. by a presented handler not being called.
+	// even when the tracking is stuck.
 	if v.vsyncDisabled.Load() &&
-		v.queuedPresents.Load() >= maximumDrawableCount-1 &&
+		v.queuedPresents() >= maximumDrawableCount-1 &&
 		time.Since(v.lastPresentTime) < time.Second/4 {
 		return ca.MetalDrawable{}
 	}
