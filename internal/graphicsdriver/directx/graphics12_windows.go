@@ -84,6 +84,9 @@ type graphics12 struct {
 	meshes    map[graphicsdriver.MeshID]*mesh12
 	instances [frameCount][]*resourceWithSize
 
+	// frame counts the ended frames, for the depth clear of each frame. It is untested.
+	frame int64
+
 	graphicsInfra *graphicsInfra
 
 	window windows.HWND
@@ -864,6 +867,8 @@ func (g *graphics12) End(mode graphicsdriver.FlushMode) error {
 	}
 
 	if mode != graphicsdriver.FlushModeIntermediate {
+		g.frame++
+
 		if mode == graphicsdriver.FlushModePresent {
 			if err := g.moveToNextFrame(); err != nil {
 				return err
@@ -1305,7 +1310,8 @@ func (g *graphics12) DrawTriangles(dstID graphicsdriver.ImageID, srcs [graphics.
 		return fmt.Errorf("directx: shader ID is invalid")
 	}
 
-	dst, srcImages, err := g.beginDraw(dstID, srcs)
+	// The depth test of a triangle draw is untested.
+	dst, srcImages, err := g.beginDraw(dstID, srcs, blend.DepthTest)
 	if err != nil {
 		return err
 	}
@@ -1334,8 +1340,9 @@ func (g *graphics12) DrawTriangles(dstID graphicsdriver.ImageID, srcs [graphics.
 }
 
 // beginDraw moves dst and the source images to their states, and sets dst as the render target, the
-// viewport, and the topology for a draw.
-func (g *graphics12) beginDraw(dstID graphicsdriver.ImageID, srcs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID) (*image12, [graphics.ShaderSrcImageCount]*image12, error) {
+// viewport, and the topology for a draw. With depth, it also gives dst a depth buffer, which it clears
+// at the first depth draw of each frame.
+func (g *graphics12) beginDraw(dstID graphicsdriver.ImageID, srcs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, depth bool) (*image12, [graphics.ShaderSrcImageCount]*image12, error) {
 	var srcImages [graphics.ShaderSrcImageCount]*image12
 
 	if err := g.flushCommandList(g.copyCommandList); err != nil {
@@ -1372,7 +1379,21 @@ func (g *graphics12) beginDraw(dstID graphicsdriver.ImageID, srcs [graphics.Shad
 		g.drawCommandList.ResourceBarrier(resourceBarriers)
 	}
 
-	if err := dst.setAsRenderTarget(g.drawCommandList, g.device); err != nil {
+	var pdsv *_D3D12_CPU_DESCRIPTOR_HANDLE
+	if depth {
+		needsClear := dst.dsvDescriptorHeap == nil || dst.depthFrame != g.frame
+		dsv, err := dst.ensureDepthStencilView(g.device)
+		if err != nil {
+			return nil, srcImages, err
+		}
+		if needsClear {
+			g.drawCommandList.ClearDepthStencilView(dsv, _D3D12_CLEAR_FLAG_DEPTH, 1, 0, nil)
+			dst.depthFrame = g.frame
+		}
+		pdsv = &dsv
+	}
+
+	if err := dst.setAsRenderTarget(g.drawCommandList, g.device, pdsv); err != nil {
 		return nil, srcImages, err
 	}
 
@@ -1408,7 +1429,7 @@ func (g *graphics12) CanDrawMesh() bool {
 }
 
 // DrawMesh is untested.
-func (g *graphics12) DrawMesh(dstID graphicsdriver.ImageID, srcs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, meshID graphicsdriver.MeshID, instances []float32, blend graphicsdriver.Blend, uniforms []uint32) error {
+func (g *graphics12) DrawMesh(dstID graphicsdriver.ImageID, srcs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, meshID graphicsdriver.MeshID, instances []float32, blend graphicsdriver.Blend, uniforms []uint32, depth bool) error {
 	m := g.meshes[meshID]
 	if m == nil || len(instances) == 0 {
 		return nil
@@ -1436,7 +1457,7 @@ func (g *graphics12) DrawMesh(dstID graphicsdriver.ImageID, srcs [graphics.Shade
 		return err
 	}
 
-	dst, srcImages, err := g.beginDraw(dstID, srcs)
+	dst, srcImages, err := g.beginDraw(dstID, srcs, depth)
 	if err != nil {
 		return err
 	}
@@ -1465,7 +1486,7 @@ func (g *graphics12) DrawMesh(dstID graphicsdriver.ImageID, srcs [graphics.Shade
 	if err := g.pipelineStates.bindShaderResources(g.device, g.drawCommandList, g.frameIndex, srcImages, g.tmpUniforms); err != nil {
 		return err
 	}
-	s, err := shader.pipelineState(blend, dst.screen)
+	s, err := shader.pipelineState(blend, dst.screen, depth)
 	if err != nil {
 		return err
 	}

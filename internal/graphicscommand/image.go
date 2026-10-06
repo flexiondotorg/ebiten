@@ -159,7 +159,7 @@ func (i *Image) DrawTrianglesWithOffset(srcs [graphics.ShaderSrcImageCount]*Imag
 }
 
 // DrawMesh draws the mesh once for each instance record.
-func (i *Image) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Image, mesh *Mesh, instances []float32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32) {
+func (i *Image) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Image, mesh *Mesh, instances []float32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32, depth bool) {
 	for _, src := range srcs {
 		if src == nil {
 			continue
@@ -171,7 +171,7 @@ func (i *Image) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Image, mesh *Mesh, 
 	}
 	i.flushBufferedWritePixels()
 
-	theCommandQueueManager.enqueueDrawMeshCommand(i, srcs, mesh, instances, blend, dstRegion, srcRegions, shader, uniforms)
+	theCommandQueueManager.enqueueDrawMeshCommand(i, srcs, mesh, instances, blend, dstRegion, srcRegions, shader, uniforms, depth)
 }
 
 // ReadPixels reads the image's pixels.

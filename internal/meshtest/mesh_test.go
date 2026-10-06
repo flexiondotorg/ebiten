@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package meshtest_test tests the mesh draws with instances. The tests run each step in its own frame.
+// Package meshtest_test tests the mesh draws with instances and the depth test. The tests run each step
+// in its own frame, as the depth buffer clears once a frame.
 package meshtest_test
 
 import (
@@ -109,14 +110,14 @@ func TestMain(m *testing.M) {
 	}
 }
 
-// meshShaderSource moves each copy of the mesh by the instance's DstX and DstY, and colors it with the
-// instance's color.
+// meshShaderSource moves each copy of the mesh by the instance's DstX and DstY, puts it at the depth
+// of the instance's Custom0, and colors it with the instance's color.
 const meshShaderSource = `//kage:unit pixels
 
 package main
 
 func Vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4, iDstPos vec2, iSrcPos vec2, iColor vec4, iCustom vec4) (vec4, vec2, vec4, vec4) {
-	return imageDstProjection() * vec4(dstPos+iDstPos, 0, 1), srcPos, iColor, custom
+	return imageDstProjection() * vec4(dstPos+iDstPos, iCustom.x, 1), srcPos, iColor, custom
 }
 
 func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
@@ -124,7 +125,11 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
 }
 `
 
-const meshSize = 16
+const (
+	meshSize = 16
+	nearZ    = -0.5
+	farZ     = 0.5
+)
 
 var (
 	red   = color.RGBA{R: 0xff, A: 0xff}
@@ -143,14 +148,15 @@ func newQuadMesh() *ebiten.Mesh {
 	return ebiten.NewMesh(vs, []uint32{0, 1, 2, 1, 2, 3})
 }
 
-func instance(x, y float32, clr color.RGBA) ebiten.Vertex {
+func instance(x, y float32, z float32, clr color.RGBA) ebiten.Vertex {
 	return ebiten.Vertex{
-		DstX:   x,
-		DstY:   y,
-		ColorR: float32(clr.R) / 0xff,
-		ColorG: float32(clr.G) / 0xff,
-		ColorB: float32(clr.B) / 0xff,
-		ColorA: float32(clr.A) / 0xff,
+		DstX:    x,
+		DstY:    y,
+		ColorR:  float32(clr.R) / 0xff,
+		ColorG:  float32(clr.G) / 0xff,
+		ColorB:  float32(clr.B) / 0xff,
+		ColorA:  float32(clr.A) / 0xff,
+		Custom0: z,
 	}
 }
 
@@ -184,8 +190,8 @@ func TestMeshInstances(t *testing.T) {
 			Mesh: newQuadMesh(),
 		}
 		dst.DrawTrianglesShader32([]ebiten.Vertex{
-			instance(4, 8, red),
-			instance(40, 36, blue),
+			instance(4, 8, 0, red),
+			instance(40, 36, 0, blue),
 		}, nil, s, op)
 
 		checkPixels(t, dst, func(p image.Point) color.RGBA {
@@ -224,7 +230,7 @@ func TestMeshBetweenTriangles(t *testing.T) {
 		}
 
 		rect(0, 0, red)
-		dst.DrawTrianglesShader32([]ebiten.Vertex{instance(24, 24, green)}, nil, s, &ebiten.DrawTrianglesShaderOptions{
+		dst.DrawTrianglesShader32([]ebiten.Vertex{instance(24, 24, 0, green)}, nil, s, &ebiten.DrawTrianglesShaderOptions{
 			Mesh: newQuadMesh(),
 		})
 		rect(48, 48, blue)
@@ -243,17 +249,141 @@ func TestMeshBetweenTriangles(t *testing.T) {
 	})
 }
 
-// TestMeshAllocations checks that mesh draws with instances allocate nothing after the first frames.
+func TestMeshDepth(t *testing.T) {
+	var s *ebiten.Shader
+	var m *ebiten.Mesh
+	var dst *ebiten.Image
+	draw := func(x, y float32, z float32, clr color.RGBA, depth bool) {
+		dst.DrawTrianglesShader32([]ebiten.Vertex{instance(x, y, z, clr)}, nil, s, &ebiten.DrawTrianglesShaderOptions{
+			Mesh:  m,
+			Depth: depth,
+		})
+	}
+
+	// A far red quad, a near blue quad, and a far green quad give blue where blue and green overlap.
+	runOnGameUpdate(func() {
+		var err error
+		s, err = ebiten.NewShader([]byte(meshShaderSource))
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		m = newQuadMesh()
+		dst = ebiten.NewImageWithOptions(image.Rect(0, 0, 64, 64), &ebiten.NewImageOptions{Unmanaged: true})
+
+		draw(8, 8, farZ, red, true)
+		draw(16, 16, nearZ, blue, true)
+		draw(24, 24, farZ, green, true)
+
+		checkPixels(t, dst, func(p image.Point) color.RGBA {
+			switch {
+			case inQuad(p, 16, 16):
+				return blue
+			case inQuad(p, 24, 24):
+				return green
+			case inQuad(p, 8, 8):
+				return red
+			}
+			return color.RGBA{}
+		})
+	})
+	if t.Failed() {
+		return
+	}
+
+	// In the next frame, the depth buffer is clear, so a far green quad covers the place of the near blue one.
+	// A draw on a sub-image sets the scissor rectangle to a part of dst first, and the clear must ignore it.
+	runOnGameUpdate(func() {
+		dst.Clear()
+		dst.SubImage(image.Rect(60, 60, 64, 64)).(*ebiten.Image).Fill(color.White)
+		draw(16, 16, farZ, green, true)
+
+		checkPixels(t, dst, func(p image.Point) color.RGBA {
+			switch {
+			case inQuad(p, 16, 16):
+				return green
+			case p.In(image.Rect(60, 60, 64, 64)):
+				return color.RGBA{0xff, 0xff, 0xff, 0xff}
+			}
+			return color.RGBA{}
+		})
+	})
+
+	// Without Depth, a far green quad covers a near blue one.
+	runOnGameUpdate(func() {
+		dst.Clear()
+		draw(16, 16, nearZ, blue, true)
+		draw(16, 16, farZ, green, false)
+
+		checkPixels(t, dst, func(p image.Point) color.RGBA {
+			if inQuad(p, 16, 16) {
+				return green
+			}
+			return color.RGBA{}
+		})
+	})
+}
+
+// TestMeshDepthDiscard checks that the depth discard at the end of a frame keeps the pixels, and that it waits for the
+// last depth draw to a destination when the frame draws to another destination between depth draws. The pixels are
+// read in the next frame, because a read flushes the frame in the middle, and only the last flush of a frame discards.
+func TestMeshDepthDiscard(t *testing.T) {
+	var s *ebiten.Shader
+	var m *ebiten.Mesh
+	var dst, other *ebiten.Image
+	draw := func(img *ebiten.Image, x, y float32, z float32, clr color.RGBA) {
+		img.DrawTrianglesShader32([]ebiten.Vertex{instance(x, y, z, clr)}, nil, s, &ebiten.DrawTrianglesShaderOptions{
+			Mesh:  m,
+			Depth: true,
+		})
+	}
+
+	runOnGameUpdates(2, func(i int) {
+		if i == 0 {
+			var err error
+			s, err = ebiten.NewShader([]byte(meshShaderSource))
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			m = newQuadMesh()
+			dst = ebiten.NewImageWithOptions(image.Rect(0, 0, 64, 64), &ebiten.NewImageOptions{Unmanaged: true})
+			other = ebiten.NewImageWithOptions(image.Rect(0, 0, 64, 64), &ebiten.NewImageOptions{Unmanaged: true})
+
+			// A near blue quad, a draw to another image, and a far green quad that the depth of the blue quad hides.
+			draw(dst, 16, 16, nearZ, blue)
+			draw(other, 0, 0, nearZ, red)
+			draw(dst, 24, 24, farZ, green)
+			return
+		}
+		if s == nil {
+			return
+		}
+		checkPixels(t, dst, func(p image.Point) color.RGBA {
+			switch {
+			case inQuad(p, 16, 16):
+				return blue
+			case inQuad(p, 24, 24):
+				return green
+			}
+			return color.RGBA{}
+		})
+	})
+}
+
+// TestMeshAllocations checks that mesh draws with instances and Depth allocate nothing after the first frames.
 func TestMeshAllocations(t *testing.T) {
 	var s *ebiten.Shader
 	var m *ebiten.Mesh
 	var dst *ebiten.Image
 	instances := []ebiten.Vertex{
-		instance(8, 8, red),
-		instance(16, 16, blue),
-		instance(24, 24, green),
+		instance(8, 8, farZ, red),
+		instance(16, 16, nearZ, blue),
+		instance(24, 24, farZ, green),
 	}
-	op := &ebiten.DrawTrianglesShaderOptions{}
+	op := &ebiten.DrawTrianglesShaderOptions{
+		Depth: true,
+	}
 	draw := func() {
 		for range 8 {
 			dst.DrawTrianglesShader32(instances, nil, s, op)

@@ -186,6 +186,11 @@ type graphics11 struct {
 	instanceBuffer            *_ID3D11Buffer
 	instanceBufferSizeInBytes uint32
 
+	// depthStencilState is the depth test of the depth draws, and frame counts the ended frames, for the depth clear
+	// of each frame. They are untested.
+	depthStencilState *_ID3D11DepthStencilState
+	frame             int64
+
 	vsyncEnabled bool
 	window       windows.HWND
 }
@@ -322,6 +327,9 @@ func (g *graphics11) IsOccluded() bool {
 }
 
 func (g *graphics11) End(mode graphicsdriver.FlushMode) error {
+	if mode != graphicsdriver.FlushModeIntermediate {
+		g.frame++
+	}
 	if mode != graphicsdriver.FlushModePresent {
 		return nil
 	}
@@ -554,7 +562,15 @@ func (g *graphics11) removeShader(s *shader11) {
 }
 
 func (g *graphics11) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, dstRegions []graphicsdriver.DstRegion, indexOffset int, blend graphicsdriver.Blend, uniforms []uint32) error {
-	if _, err := g.beginDraw(dstID, srcIDs, shaderID, blend, uniforms); err != nil {
+	// The depth test of a triangle draw is untested.
+	var dsv *_ID3D11DepthStencilView
+	if blend.DepthTest {
+		var err error
+		if dsv, err = g.useDepth(dstID); err != nil {
+			return err
+		}
+	}
+	if _, err := g.beginDraw(dstID, srcIDs, shaderID, blend, uniforms, dsv); err != nil {
 		return err
 	}
 
@@ -574,10 +590,11 @@ func (g *graphics11) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphic
 	return nil
 }
 
-// beginDraw sets the render target, the shader, and the blend state for a draw into dst, and returns dst.
-func (g *graphics11) beginDraw(dstID graphicsdriver.ImageID, srcIDs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, blend graphicsdriver.Blend, uniforms []uint32) (*image11, error) {
+// beginDraw sets the render target, the depth-stencil view dsv if it is not nil, the shader, and the
+// blend state for a draw into dst, and returns dst.
+func (g *graphics11) beginDraw(dstID graphicsdriver.ImageID, srcIDs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, blend graphicsdriver.Blend, uniforms []uint32, dsv *_ID3D11DepthStencilView) (*image11, error) {
 	// Remove bound textures first. This is needed to avoid warnings on the debugger.
-	g.deviceContext.OMSetRenderTargets([]*_ID3D11RenderTargetView{nil})
+	g.deviceContext.OMSetRenderTargets([]*_ID3D11RenderTargetView{nil}, nil)
 	var srvs [graphics.ShaderSrcImageCount]*_ID3D11ShaderResourceView
 	g.deviceContext.PSSetShaderResources(0, srvs[:])
 
@@ -603,7 +620,7 @@ func (g *graphics11) beginDraw(dstID graphicsdriver.ImageID, srcIDs [graphics.Sh
 		},
 	})
 
-	if err := dst.setAsRenderTarget(); err != nil {
+	if err := dst.setAsRenderTarget(dsv); err != nil {
 		return nil, err
 	}
 
@@ -622,6 +639,45 @@ func (g *graphics11) beginDraw(dstID graphicsdriver.ImageID, srcIDs [graphics.Sh
 	return dst, nil
 }
 
+// useDepth gives dst a depth buffer, clears it at the first depth draw of each frame, sets the depth test,
+// and returns the depth-stencil view for beginDraw. It is untested.
+func (g *graphics11) useDepth(dstID graphicsdriver.ImageID) (*_ID3D11DepthStencilView, error) {
+	dst := g.images[dstID]
+	if dst.depthStencilView == nil || dst.depthFrame != g.frame {
+		v, err := dst.ensureDepthStencilView()
+		if err != nil {
+			return nil, err
+		}
+		g.deviceContext.ClearDepthStencilView(v, uint8(_D3D11_CLEAR_DEPTH), 1, 0)
+		dst.depthFrame = g.frame
+	}
+
+	if g.depthStencilState == nil {
+		keep := _D3D11_DEPTH_STENCILOP_DESC{
+			StencilFailOp:      _D3D11_STENCIL_OP_KEEP,
+			StencilDepthFailOp: _D3D11_STENCIL_OP_KEEP,
+			StencilPassOp:      _D3D11_STENCIL_OP_KEEP,
+			StencilFunc:        _D3D11_COMPARISON_ALWAYS,
+		}
+		s, err := g.device.CreateDepthStencilState(&_D3D11_DEPTH_STENCIL_DESC{
+			DepthEnable:      1,
+			DepthWriteMask:   _D3D11_DEPTH_WRITE_MASK_ALL,
+			DepthFunc:        _D3D11_COMPARISON_LESS_EQUAL,
+			StencilReadMask:  _D3D11_DEFAULT_STENCIL_READ_MASK,
+			StencilWriteMask: _D3D11_DEFAULT_STENCIL_WRITE_MASK,
+			FrontFace:        keep,
+			BackFace:         keep,
+		})
+		if err != nil {
+			return nil, err
+		}
+		g.depthStencilState = s
+	}
+	// Without a depth-stencil view, the other draws ignore this state.
+	g.deviceContext.OMSetDepthStencilState(g.depthStencilState, 0)
+	return dst.depthStencilView, nil
+}
+
 // mesh11 is a mesh on the GPU. It is untested.
 type mesh11 struct {
 	vertexBuffer *_ID3D11Buffer
@@ -637,7 +693,7 @@ func (g *graphics11) CanDrawMesh() bool {
 }
 
 // DrawMesh is untested.
-func (g *graphics11) DrawMesh(dstID graphicsdriver.ImageID, srcIDs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, meshID graphicsdriver.MeshID, instances []float32, blend graphicsdriver.Blend, uniforms []uint32) error {
+func (g *graphics11) DrawMesh(dstID graphicsdriver.ImageID, srcIDs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, meshID graphicsdriver.MeshID, instances []float32, blend graphicsdriver.Blend, uniforms []uint32, depth bool) error {
 	m := g.meshes[meshID]
 	if m == nil || len(instances) == 0 {
 		return nil
@@ -668,7 +724,15 @@ func (g *graphics11) DrawMesh(dstID graphicsdriver.ImageID, srcIDs [graphics.Sha
 	copy(unsafe.Slice((*float32)(mapped.pData), len(instances)), instances)
 	g.deviceContext.Unmap(unsafe.Pointer(g.instanceBuffer), 0)
 
-	dst, err := g.beginDraw(dstID, srcIDs, shaderID, blend, uniforms)
+	var dsv *_ID3D11DepthStencilView
+	if depth {
+		var err error
+		if dsv, err = g.useDepth(dstID); err != nil {
+			return err
+		}
+	}
+
+	dst, err := g.beginDraw(dstID, srcIDs, shaderID, blend, uniforms, dsv)
 	if err != nil {
 		return err
 	}

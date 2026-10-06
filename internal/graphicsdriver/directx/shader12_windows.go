@@ -22,6 +22,7 @@ import (
 type pipelineStateKey struct {
 	blend  graphicsdriver.Blend
 	screen bool
+	depth  bool
 }
 
 type shader12 struct {
@@ -69,16 +70,17 @@ func (s *shader12) disposeImpl() {
 	}
 }
 
-func (s *shader12) pipelineState(blend graphicsdriver.Blend, screen bool) (*_ID3D12PipelineState, error) {
+func (s *shader12) pipelineState(blend graphicsdriver.Blend, screen bool, depth bool) (*_ID3D12PipelineState, error) {
 	key := pipelineStateKey{
 		blend:  blend,
 		screen: screen,
+		depth:  depth,
 	}
 	if state, ok := s.pipelineStates[key]; ok {
 		return state, nil
 	}
 
-	state, err := s.graphics.pipelineStates.newPipelineState(s.graphics.device, s.vertexShader, s.pixelShader, blend, screen, s.mesh)
+	state, err := s.graphics.pipelineStates.newPipelineState(s.graphics.device, s.vertexShader, s.pixelShader, blend, screen, s.mesh, depth)
 	if err != nil {
 		return nil, err
 	}

@@ -32,6 +32,10 @@ type Image struct {
 	width       int
 	height      int
 	screen      bool
+
+	// depthBuffer is the depth buffer, and depthFrame is the frame in which the depth buffer was cleared last.
+	depthBuffer renderbufferNative
+	depthFrame  int64
 }
 
 // framebuffer is a wrapper of OpenGL's framebuffer.
@@ -53,6 +57,10 @@ func (i *Image) Dispose() {
 	if i.texture != 0 {
 		i.graphics.context.deleteTexture(i.texture)
 		i.texture = 0
+	}
+	if i.depthBuffer != 0 {
+		i.graphics.context.deleteRenderbuffer(i.depthBuffer)
+		i.depthBuffer = 0
 	}
 
 	i.graphics.removeImage(i)

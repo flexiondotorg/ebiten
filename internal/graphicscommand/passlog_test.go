@@ -34,36 +34,38 @@ func TestPassLogGroupsPasses(t *testing.T) {
 	shader := &Shader{id: 7}
 	mesh := &Mesh{id: 1}
 	full := []graphicsdriver.DstRegion{{Region: image.Rect(0, 0, 1280, 800), IndexCount: 6}}
+	depthBlend := graphicsdriver.BlendSourceOver
+	depthBlend.DepthTest = true
 
 	tri := func(dst *Image, blend graphicsdriver.Blend, src *Image) command {
 		var srcs [graphics.ShaderSrcImageCount]*Image
 		srcs[0] = src
 		return &drawTrianglesCommand{dst: dst, srcs: srcs, blend: blend, dstRegions: full, shader: shader}
 	}
-	meshDraw := func(dst *Image) command {
-		return &drawMeshCommand{dst: dst, mesh: mesh, instances: make([]float32, graphics.VertexFloatCount), shader: shader}
+	meshDraw := func(dst *Image, depth bool) command {
+		return &drawMeshCommand{dst: dst, mesh: mesh, instances: make([]float32, graphics.VertexFloatCount), shader: shader, depth: depth}
 	}
 	frame := []command{
-		tri(scene, graphicsdriver.BlendClear, nil), // pass 1
-		tri(scene, graphicsdriver.BlendSourceOver, nil),
-		meshDraw(scene), // same pass
-		meshDraw(scene),
-		tri(road, graphicsdriver.BlendCopy, nil), // pass 2
+		tri(scene, graphicsdriver.BlendClear, nil), // pass 1: depth loads, from frame 0
+		meshDraw(scene, true),                      // pass 2: the first depth draw clears depth
+		meshDraw(scene, true),                      // same pass
+		tri(road, graphicsdriver.BlendCopy, nil),   // pass 3
 		&writePixelsCommand{dst: road, args: []writePixelsCommandArgs{{region: image.Rect(0, 0, 4, 4)}}},
-		tri(road, graphicsdriver.BlendSourceOver, nil), // pass 3: the write ends pass 2
-		tri(screen, graphicsdriver.BlendCopy, scene),   // pass 4
+		tri(road, graphicsdriver.BlendSourceOver, nil), // pass 4: the write ends pass 3
+		tri(scene, depthBlend, road),                   // pass 5: depth loads, as it is cleared already
+		tri(screen, graphicsdriver.BlendCopy, scene),   // pass 6
 	}
 
 	path := filepath.Join(t.TempDir(), "passes.txt")
 	p := newPassLogger(path, 1)
-	// Frame 0 is not captured.
-	p.observe(frame[:1], graphicsdriver.FlushModePresent, nil)
+	// Frame 0 is not captured, but it records that scene has a depth buffer, so that pass 1 loads it.
+	p.observe(frame[1:2], graphicsdriver.FlushModePresent, nil)
 	if len(p.entries) != 0 {
 		t.Fatalf("frame 0: got %d entries, want none", len(p.entries))
 	}
 	passLog = p
-	p.observe(frame[:5], graphicsdriver.FlushModeIntermediate, nil)
-	p.observe(frame[5:], graphicsdriver.FlushModePresent, nil)
+	p.observe(frame[:4], graphicsdriver.FlushModeIntermediate, nil)
+	p.observe(frame[4:], graphicsdriver.FlushModePresent, nil)
 	if passLog != nil {
 		passLog = nil
 		t.Fatal("the pass log is still on after the captured frame")
@@ -71,19 +73,22 @@ func TestPassLogGroupsPasses(t *testing.T) {
 
 	type want struct {
 		dst                 int
+		depth, clearDepth   bool
 		draws, meshes       int
 		texWidth, texHeight int
 	}
 	wants := []want{
-		{1, 4, 2, 2048, 1024},
-		{2, 1, 0, 512, 512},
-		{2, 1, 0, 512, 512},
-		{3, 1, 0, 1280, 800},
+		{1, true, false, 1, 0, 2048, 1024},
+		{1, true, true, 2, 2, 2048, 1024},
+		{2, false, false, 1, 0, 512, 512},
+		{2, false, false, 1, 0, 512, 512},
+		{1, true, false, 1, 0, 2048, 1024},
+		{3, false, false, 1, 0, 1280, 800},
 	}
 	var got []want
 	for _, e := range p.entries {
 		if e.line == "" {
-			got = append(got, want{e.dst, e.draws, e.meshes, e.texWidth, e.texHeight})
+			got = append(got, want{e.dst, e.depth, e.clearDepth, e.draws, e.meshes, e.texWidth, e.texHeight})
 		}
 	}
 	if len(got) != len(wants) {
@@ -100,14 +105,15 @@ func TestPassLogGroupsPasses(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := strings.Join(strings.Fields(string(b)), " ")
-	// Scene: 1 pass of 2048x1024 = 2097152 pixels, 8.4 MB each way. Road: 2 passes of 512x512,
-	// 1.0 MB each way. Screen: stores 4.1 MB.
+	// Scene: 3 passes with colour and depth, 2048x1024 = 2097152 pixels, 8.4 MB a pass each way, less
+	// one depth load for the clear: loaded 3*16.8-8.4 = 41.9 MB, stored 3*16.8 = 50.3 MB.
+	// Road: 2 passes of 512x512 colour: 2.1 MB each way. Screen: stores 4.1 MB.
 	for _, s := range []string{
-		"passes: 4",
-		"draws: 4, mesh draws: 2, shaders: 7",
-		"loaded 10.5 MB, stored 14.6 MB, total 25.1 MB",
-		"1 1280x800 (2048x1024) 1 8.4 8.4 16.8",
-		"3 1280x800 screen 1 0.0 4.1 4.1",
+		"passes: 6, with depth: 3, that clear depth: 1",
+		"depth: clears, draws: 2, mesh draws: 2, shaders: 7",
+		"loaded 44.0 MB, stored 56.5 MB, total 100.6 MB",
+		"1 1280x800 (2048x1024) 3 3 1 41.9 50.3 92.3",
+		"3 1280x800 screen 1 0 0 0.0 4.1 4.1",
 		"write-pixels: dst: 2, args: region: (0,0)-(4,4); ends the render pass",
 		"flush 1 (intermediate) ends the render pass",
 	} {
@@ -202,11 +208,11 @@ func TestPassLogTimesPasses(t *testing.T) {
 	out := strings.Join(strings.Fields(b), " ")
 	for _, s := range []string{
 		"GPU time: the GPU time of each pass",
-		"pass 1: dst 1 (offscreen) 1280x800 in a 2048x1024 texture, GPU: 1.500 ms",
-		"pass 2: dst 2 (screen) 1280x800, GPU: 0.250 ms",
+		"pass 1: dst 1 (offscreen) 1280x800 in a 2048x1024 texture, depth: none, GPU: 1.500 ms",
+		"pass 2: dst 2 (screen) 1280x800, depth: none, GPU: 0.250 ms",
 		"GPU time of the passes: 1.750 ms",
 		"total MB GPU ms",
-		"1 1280x800 (2048x1024) 1 8.4 8.4 16.8 1.500",
+		"1 1280x800 (2048x1024) 1 0 0 8.4 8.4 16.8 1.500",
 	} {
 		if !strings.Contains(out, s) {
 			t.Errorf("the log does not contain %q:\n%s", s, b)
@@ -219,15 +225,15 @@ func TestPassLogTimesPasses(t *testing.T) {
 
 func TestPassLogListsUnmatchedPassTimes(t *testing.T) {
 	d := &passTimerDriver{times: []graphicsdriver.PassTime{
-		{Dst: 11, Width: 640, Height: 400, GPU: 1500 * time.Microsecond},
+		{Dst: 11, Width: 640, Height: 400, Depth: true, GPU: 1500 * time.Microsecond},
 		{Dst: 12, Width: 1280, Height: 800, GPU: 250 * time.Microsecond},
 	}}
 	b := capturePassTimes(t, d)
 	out := strings.Join(strings.Fields(b), " ")
 	for _, s := range []string{
 		"the graphics driver made 2 passes, which do not match",
-		"pass 1: driver image 11 640x400, GPU: 1.500 ms",
-		"pass 2: driver image 12 1280x800, GPU: 0.250 ms",
+		"pass 1: driver image 11 640x400, depth: yes, GPU: 1.500 ms",
+		"pass 2: driver image 12 1280x800, depth: none, GPU: 0.250 ms",
 	} {
 		if !strings.Contains(out, s) {
 			t.Errorf("the log does not contain %q:\n%s", s, b)
