@@ -947,6 +947,10 @@ func (i *Image) DrawTrianglesShader32(vertices []Vertex, indices []uint32, shade
 	if src := options.Images[0]; src != nil {
 		sox, soy = src.originF32()
 	}
+	// A shader with its own vertex function gets its attributes as they are.
+	if shader.userVertex {
+		dox, doy, sox, soy = 0, 0, 0, 0
+	}
 	// Avoid using `for i, v := range vertices` as adding `v` creates a copy from `vertices` unnecessarily on each loop (#3103).
 	for i := range vertices {
 		// Create a temporary slice to reduce boundary checks.

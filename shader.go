@@ -31,6 +31,10 @@ import (
 type Shader struct {
 	shader *ui.Shader
 
+	// userVertex reports whether the shader has its own Vertex function, whose attributes are not
+	// positions in the image coordinates.
+	userVertex bool
+
 	// unit is the unit the shader was authored in (//kage:unit). The compiled shader always runs in
 	// the pixel unit; this is kept only to enforce the user-facing rules of the texel unit, such as
 	// requiring source images to be the same size.
@@ -57,8 +61,9 @@ func newShader(src []byte, name string) (*Shader, error) {
 		return nil, err
 	}
 	return &Shader{
-		shader: ui.NewShader(ir, name),
-		unit:   unit,
+		shader:     ui.NewShader(ir, name),
+		userVertex: ir.UserVertex,
+		unit:       unit,
 	}, nil
 }
 
