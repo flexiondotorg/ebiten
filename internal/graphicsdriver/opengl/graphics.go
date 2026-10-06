@@ -67,6 +67,12 @@ type Graphics struct {
 	// The cache is accessed on the render thread.
 	pixelPackBuffers readbackcache.Cache[int, buffer]
 
+	// frame counts the ended frames, for the GPU timing.
+	frame int64
+
+	// timer is the GPU timing of the frames, see graphicsdriver.FrameTimer.
+	timer gpuTimer
+
 	graphicsPlatform
 }
 
@@ -88,11 +94,16 @@ func (g *Graphics) ColorSpace() color.ColorSpace {
 }
 
 func (g *Graphics) Begin() error {
-	// Do nothing.
+	g.beginTiming()
 	return nil
 }
 
 func (g *Graphics) End(mode graphicsdriver.FlushMode) error {
+	g.endTiming(mode)
+	if mode != graphicsdriver.FlushModeIntermediate {
+		g.frame++
+	}
+
 	// Call glFlush to prevent black flickering (especially on Android (#226) and iOS).
 	// TODO: examples/sprites worked without this. Is this really needed?
 	g.context.ctx.Flush()
@@ -194,12 +205,14 @@ func (g *Graphics) Initialize() error {
 	if err := g.state.reset(&g.context); err != nil {
 		return err
 	}
+	g.timer.supported.Store(g.context.ctx.HasTimerQuery())
 	return nil
 }
 
 // Reset resets or initializes the current OpenGL state.
 func (g *Graphics) Reset() error {
 	g.clearPixelPackBuffers()
+	g.resetTiming()
 	return g.state.reset(&g.context)
 }
 
@@ -216,6 +229,9 @@ func (g *Graphics) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphics.
 	destination := g.images[dstID]
 
 	g.drawCalled = true
+	if len(dstRegions) > 0 {
+		g.beginPass(destination)
+	}
 
 	if err := destination.setViewport(); err != nil {
 		return err
