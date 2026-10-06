@@ -71,6 +71,9 @@ type Program struct {
 	// Kage source.
 	FragmentSource []byte
 
+	// UserVertex reports whether VertexFunc comes from the source's own Vertex function instead of the builtin one.
+	UserVertex bool
+
 	// ProjectionUniform is the index of the uniform variable of the projection matrix, a mat4, or 0 if the program
 	// has none. On OpenGL, the projection flips Y for the screen, whose window coordinates start at the bottom, and the
 	// fragment entry point then gets its position from the top of the screen through it, as on any other image.

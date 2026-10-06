@@ -481,11 +481,14 @@ func (i *Image) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 
 	// The command queue adds the offsets of the destination and the source as it copies the vertices,
 	// so that the caller's vertices stay as they are.
+	// A shader with its own vertex function adds the origins itself, as its attributes might not be positions.
 	var offset [4]float32
-	offset[0], offset[1] = float32(r.Min.X), float32(r.Min.Y)
-	if srcs[0] != nil {
-		r := srcs[0].regionWithPadding()
-		offset[2], offset[3] = float32(r.Min.X), float32(r.Min.Y)
+	if !shader.ir.UserVertex {
+		offset[0], offset[1] = float32(r.Min.X), float32(r.Min.Y)
+		if srcs[0] != nil {
+			r := srcs[0].regionWithPadding()
+			offset[2], offset[3] = float32(r.Min.X), float32(r.Min.Y)
+		}
 	}
 
 	var imgs [graphics.ShaderSrcImageCount]*graphicscommand.Image
