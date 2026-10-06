@@ -1795,15 +1795,22 @@ func (i *Image) invokeUsageCallbacks() {
 	}
 	defer i.inUsageCallbacks.Store(false)
 
-	tmpUsageCallbackSlice := theTmpUsageCallbackSlicePool.Get().(*[]usageCallback)
-
+	var tmpUsageCallbackSlice *[]usageCallback
 	func() {
 		i.usageCallbacksMu.Lock()
 		defer i.usageCallbacksMu.Unlock()
+		// Most images have no callbacks. Skip the pool for them.
+		if len(i.usageCallbacks) == 0 {
+			return
+		}
+		tmpUsageCallbackSlice = theTmpUsageCallbackSlicePool.Get().(*[]usageCallback)
 		for _, cb := range i.usageCallbacks {
 			*tmpUsageCallbackSlice = append(*tmpUsageCallbackSlice, cb)
 		}
 	}()
+	if tmpUsageCallbackSlice == nil {
+		return
+	}
 
 	for _, cb := range *tmpUsageCallbackSlice {
 		cb.fn(i)
