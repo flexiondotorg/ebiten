@@ -410,9 +410,12 @@ type platformLibraryContextState struct {
 		DestroyContext      func(display uintptr, ctx uintptr) bool
 		CreateWindowSurface func(display uintptr, config uintptr, win _XID, attribList *int32) uintptr
 		MakeCurrent         func(display uintptr, draw uintptr, read uintptr, ctx uintptr) bool
-		SwapBuffers         func(display uintptr, surface uintptr) bool
-		SwapInterval        func(display uintptr, interval int32) bool
 		QueryString         func(display uintptr, name int32) uintptr
 		GetProcAddress      func(procname string) uintptr
+
+		// swapBuffers and swapInterval are called in each frame, through eglSwapBuffers and
+		// eglSwapInterval without allocations.
+		swapBuffers  uintptr
+		swapInterval uintptr
 	}
 }
