@@ -31,6 +31,9 @@ type shader11 struct {
 	pixelShaderBlob  *_ID3DBlob
 	tmpUniforms      []uint32
 
+	// mesh reports whether the shader reads the instance attributes of a mesh draw.
+	mesh bool
+
 	inputLayout    *_ID3D11InputLayout
 	vertexShader   *_ID3D11VertexShader
 	pixelShader    *_ID3D11PixelShader
@@ -136,7 +139,11 @@ func (s *shader11) ensureInputLayout() (*_ID3D11InputLayout, error) {
 		return s.inputLayout, nil
 	}
 
-	i, err := s.graphics.device.CreateInputLayout(inputElementDescsForDX11, s.vertexShaderBlob.GetBufferPointer(), s.vertexShaderBlob.GetBufferSize())
+	descs := inputElementDescsForDX11
+	if s.mesh {
+		descs = inputElementDescsForMeshDX11
+	}
+	i, err := s.graphics.device.CreateInputLayout(descs, s.vertexShaderBlob.GetBufferPointer(), s.vertexShaderBlob.GetBufferSize())
 	if err != nil {
 		return nil, err
 	}

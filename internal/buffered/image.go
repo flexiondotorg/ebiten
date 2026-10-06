@@ -116,6 +116,24 @@ func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 	i.cache.reset()
 }
 
+// DrawMesh draws the mesh once for each instance record.
+func (i *Image) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Image, mesh *graphicscommand.Mesh, instances []float32, blend graphicsdriver.Blend, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *atlas.Shader, uniforms []uint32) {
+	var imgs [graphics.ShaderSrcImageCount]*atlas.Image
+	for j, src := range srcs {
+		if i == src {
+			panic("buffered: Image.DrawMesh: source images must be different from the receiver")
+		}
+		if src != nil {
+			src.writeBackPixelsIfNeeded()
+			imgs[j] = src.img
+		}
+	}
+	i.writeBackPixelsIfNeeded()
+
+	i.img.DrawMesh(imgs, mesh, instances, blend, srcRegions, shader, uniforms)
+	i.cache.reset()
+}
+
 // writeBackPixelsIfNeeded applies the pending pixel writes to the GPU.
 func (i *Image) writeBackPixelsIfNeeded() {
 	i.cache.writeBackPixelsIfNeeded(i.img)

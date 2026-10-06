@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"image"
 	"log/slog"
-	"math"
 	"runtime"
 	"slices"
 	"time"
@@ -47,6 +46,8 @@ const (
 	// residencyKeepAliveDuration is how long the resources are kept resident after the last draw.
 	residencyKeepAliveDuration = 3 * time.Minute
 )
+
+var _ graphicsdriver.MeshDrawer = (*Graphics)(nil)
 
 type Graphics struct {
 	view view
@@ -110,6 +111,16 @@ type Graphics struct {
 	// emptyTexture is a transparent 1x1 texture for a source slot without an image.
 	emptyTexture mtl.Texture
 
+	// meshes holds the vertex buffer and the index buffer of each mesh.
+	meshes map[graphicsdriver.MeshID]mesh
+
+	// instances places the instance records of the mesh draws of a frame in instanceBuf.
+	instances   instanceSpace
+	instanceBuf mtl.Buffer
+
+	// instanceContents is the address of the contents of instanceBuf.
+	instanceContents unsafe.Pointer
+
 	// residencySet holds the textures and the buffers to keep resident in GPU memory.
 	// residencySet is zero if residency sets are not available.
 	residencySet mtl.ResidencySet
@@ -128,6 +139,13 @@ type Graphics struct {
 	keepAliveTexture mtl.Texture
 
 	pool cocoa.NSAutoreleasePool
+}
+
+// mesh is a vertex buffer and an index buffer on the GPU.
+type mesh struct {
+	vb         mtl.Buffer
+	ib         mtl.Buffer
+	indexCount int
 }
 
 var (
@@ -229,18 +247,6 @@ func (g *Graphics) SetMainThreadRunner(f func(func())) {
 // SetUIView is concurrent safe.
 func (g *Graphics) SetUIView(uiview uintptr) {
 	g.view.setUIView(uiview)
-}
-
-func pow2(x uintptr) uintptr {
-	if x > (math.MaxUint+1)/2 {
-		return math.MaxUint
-	}
-
-	var p2 uintptr = 1
-	for p2 < x {
-		p2 *= 2
-	}
-	return p2
 }
 
 // pooledBuffer is a buffer of the pool with its length, so that the pool does not ask Metal for it.
@@ -357,25 +363,27 @@ func (g *Graphics) ensureCommandBuffer() error {
 	return nil
 }
 
-func (g *Graphics) availableBuffer(length uintptr) (mtl.Buffer, error) {
+// availableBuffer returns a buffer of at least length bytes for the current frame, and its length.
+func (g *Graphics) availableBuffer(length uintptr) (mtl.Buffer, uintptr, error) {
 	if err := g.ensureCommandBuffer(); err != nil {
-		return mtl.Buffer{}, err
+		return mtl.Buffer{}, 0, err
 	}
 
+	// Take the smallest buffer that fits, so that a small request does not take the instance buffer.
 	var newBuf pooledBuffer
 	for b, l := range g.unusedBuffers {
-		if l >= length {
+		if l >= length && (newBuf.buf == (mtl.Buffer{}) || l < newBuf.length) {
 			newBuf = pooledBuffer{buf: b, length: l}
-			delete(g.unusedBuffers, b)
-			break
 		}
 	}
 
-	if newBuf.buf == (mtl.Buffer{}) {
+	if newBuf.buf != (mtl.Buffer{}) {
+		delete(g.unusedBuffers, newBuf.buf)
+	} else {
 		newBuf.length = pow2(length)
 		b, err := g.view.getMTLDevice().NewBufferWithLength(newBuf.length, resourceStorageMode)
 		if err != nil {
-			return mtl.Buffer{}, fmt.Errorf("metal: device.NewBufferWithLength failed: %w", err)
+			return mtl.Buffer{}, 0, fmt.Errorf("metal: device.NewBufferWithLength failed: %w", err)
 		}
 		g.addResidentResource(b)
 		newBuf.buf = b
@@ -390,21 +398,21 @@ func (g *Graphics) availableBuffer(length uintptr) (mtl.Buffer, error) {
 		g.freeBuffers = g.freeBuffers[:len(g.freeBuffers)-1]
 	}
 	g.buffers[g.frame] = append(bufs, newBuf)
-	return newBuf.buf, nil
+	return newBuf.buf, newBuf.length, nil
 }
 
 func (g *Graphics) SetVertices(vertices []float32, indices []uint32) error {
 	vbSize := unsafe.Sizeof(vertices[0]) * uintptr(len(vertices))
 	ibSize := unsafe.Sizeof(indices[0]) * uintptr(len(indices))
 
-	vb, err := g.availableBuffer(vbSize)
+	vb, _, err := g.availableBuffer(vbSize)
 	if err != nil {
 		return err
 	}
 	g.vb = vb
 	mtl.CopyToBufferAt(g.vb, vertices, 0)
 
-	ib, err := g.availableBuffer(ibSize)
+	ib, _, err := g.availableBuffer(ibSize)
 	if err != nil {
 		return err
 	}
@@ -710,11 +718,34 @@ func (g *Graphics) flushRenderCommandEncoderIfNeeded() {
 }
 
 func (g *Graphics) draw(dst *Image, dstRegions []graphicsdriver.DstRegion, srcs [graphics.ShaderSrcImageCount]*Image, indexOffset int, shader *Shader, uniforms []uint32, blend graphicsdriver.Blend) error {
+	if ok, err := g.beginDraw(dst, srcs, shader, uniforms, blend); !ok || err != nil {
+		return err
+	}
+	g.rce.SetVertexBuffer(g.vb, 0, 0)
+
+	for _, dstRegion := range dstRegions {
+		g.rce.SetScissorRect(mtl.ScissorRect{
+			X:      dstRegion.Region.Min.X,
+			Y:      dstRegion.Region.Min.Y,
+			Width:  dstRegion.Region.Dx(),
+			Height: dstRegion.Region.Dy(),
+		})
+
+		g.rce.DrawIndexedPrimitives(mtl.PrimitiveTypeTriangle, dstRegion.IndexCount, mtl.IndexTypeUInt32, g.ib, indexOffset*int(unsafe.Sizeof(uint32(0))))
+
+		indexOffset += dstRegion.IndexCount
+	}
+
+	return nil
+}
+
+// beginDraw prepares the render command encoder for a draw to dst, and reports false when there is nothing to draw to.
+func (g *Graphics) beginDraw(dst *Image, srcs [graphics.ShaderSrcImageCount]*Image, shader *Shader, uniforms []uint32, blend graphicsdriver.Blend) (bool, error) {
 	// Writing the pixels of the empty texture ends a render pass, so make it before the render pass opens.
 	for i, src := range srcs {
 		if src == nil && i < shader.ir.TextureCount {
 			if err := g.ensureEmptyTexture(); err != nil {
-				return err
+				return false, err
 			}
 			break
 		}
@@ -760,17 +791,17 @@ func (g *Graphics) draw(dst *Image, dstRegions []graphicsdriver.DstRegion, srcs 
 
 		t := dst.mtlTexture()
 		if t == (mtl.Texture{}) {
-			return nil
+			return false, nil
 		}
 		rpd.ColorAttachments[0].Texture = t
 		rpd.ColorAttachments[0].ClearColor = mtl.ClearColor{}
 
 		if err := g.ensureCommandBuffer(); err != nil {
-			return err
+			return false, err
 		}
 		rce, err := g.cb.RenderCommandEncoderWithDescriptor(rpd)
 		if err != nil {
-			return fmt.Errorf("metal: cb.RenderCommandEncoderWithDescriptor failed: %w", err)
+			return false, fmt.Errorf("metal: cb.RenderCommandEncoderWithDescriptor failed: %w", err)
 		}
 		g.rce = rce
 		g.lastDrawTime = time.Now()
@@ -792,7 +823,6 @@ func (g *Graphics) draw(dst *Image, dstRegions []graphicsdriver.DstRegion, srcs 
 		ZNear:   -1,
 		ZFar:    1,
 	})
-	g.rce.SetVertexBuffer(g.vb, 0, 0)
 
 	if len(uniforms) > 0 {
 		g.tmpUniforms = appendUniformVariables(g.tmpUniforms[:0], shader.ir.Uniforms, uniforms)
@@ -818,27 +848,13 @@ func (g *Graphics) draw(dst *Image, dstRegions []graphicsdriver.DstRegion, srcs 
 		}
 	}
 
-	s, err := shader.RenderPipelineState(&g.view, blend, dst.screen)
+	rps, err := shader.RenderPipelineState(&g.view, blend, dst.screen)
 	if err != nil {
-		return err
+		return false, err
 	}
-	rps := s
+	g.rce.SetRenderPipelineState(rps)
 
-	for _, dstRegion := range dstRegions {
-		g.rce.SetScissorRect(mtl.ScissorRect{
-			X:      dstRegion.Region.Min.X,
-			Y:      dstRegion.Region.Min.Y,
-			Width:  dstRegion.Region.Dx(),
-			Height: dstRegion.Region.Dy(),
-		})
-
-		g.rce.SetRenderPipelineState(rps)
-		g.rce.DrawIndexedPrimitives(mtl.PrimitiveTypeTriangle, dstRegion.IndexCount, mtl.IndexTypeUInt32, g.ib, indexOffset*int(unsafe.Sizeof(uint32(0))))
-
-		indexOffset += dstRegion.IndexCount
-	}
-
-	return nil
+	return true, nil
 }
 
 func (g *Graphics) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, dstRegions []graphicsdriver.DstRegion, indexOffset int, blend graphicsdriver.Blend, uniforms []uint32) error {
@@ -861,6 +877,83 @@ func (g *Graphics) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphics.
 		return err
 	}
 
+	return nil
+}
+
+func (g *Graphics) CanDrawMesh() bool {
+	return true
+}
+
+// NewMesh uploads the vertices and the indices of a mesh. A mesh without vertices or indices stays unknown.
+func (g *Graphics) NewMesh(id graphicsdriver.MeshID, vertices []float32, indices []uint32) error {
+	if len(vertices) == 0 || len(indices) == 0 {
+		return nil
+	}
+	d := g.view.getMTLDevice()
+	vb, err := d.NewBufferWithBytes(unsafe.Pointer(&vertices[0]), unsafe.Sizeof(vertices[0])*uintptr(len(vertices)), resourceStorageMode)
+	if err != nil {
+		return fmt.Errorf("metal: device.NewBufferWithBytes failed: %w", err)
+	}
+	ib, err := d.NewBufferWithBytes(unsafe.Pointer(&indices[0]), unsafe.Sizeof(indices[0])*uintptr(len(indices)), resourceStorageMode)
+	if err != nil {
+		vb.Release()
+		return fmt.Errorf("metal: device.NewBufferWithBytes failed: %w", err)
+	}
+	if g.meshes == nil {
+		g.meshes = map[graphicsdriver.MeshID]mesh{}
+	}
+	g.meshes[id] = mesh{
+		vb:         vb,
+		ib:         ib,
+		indexCount: len(indices),
+	}
+	return nil
+}
+
+// DrawMesh draws a mesh once for each instance record. An unknown mesh ID, or a draw without instance records,
+// draws nothing.
+func (g *Graphics) DrawMesh(dstID graphicsdriver.ImageID, srcIDs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, meshID graphicsdriver.MeshID, instances []float32, blend graphicsdriver.Blend, uniforms []uint32) error {
+	if shaderID == graphicsdriver.InvalidShaderID {
+		return fmt.Errorf("metal: shader ID is invalid")
+	}
+	m, ok := g.meshes[meshID]
+	if !ok || len(instances) == 0 {
+		return nil
+	}
+
+	dst := g.images[dstID]
+	var srcs [graphics.ShaderSrcImageCount]*Image
+	for i, srcID := range srcIDs {
+		srcs[i] = g.images[srcID]
+	}
+
+	if ok, err := g.beginDraw(dst, srcs, g.shaders[shaderID], uniforms, blend); !ok || err != nil {
+		return err
+	}
+
+	// The shader reads the instance records at buffer 2 with the instance ID. The records of the
+	// draws of a frame share one instance buffer, which the frame keeps until the GPU completes it.
+	size := unsafe.Sizeof(instances[0]) * uintptr(len(instances))
+	offset, newLength := g.instances.place(g.frame, size)
+	if newLength != 0 {
+		buf, length, err := g.availableBuffer(newLength)
+		if err != nil {
+			return err
+		}
+		g.instanceBuf = buf
+		g.instanceContents = g.instanceBuf.Contents()
+		g.instances.use(length, size)
+	}
+	copy(unsafe.Slice((*byte)(unsafe.Add(g.instanceContents, offset)), size), unsafe.Slice((*byte)(unsafe.Pointer(&instances[0])), size))
+	g.instanceBuf.DidModifyRange(offset, size)
+
+	g.rce.SetVertexBuffer(m.vb, 0, 0)
+	g.rce.SetVertexBuffer(g.instanceBuf, int(offset), 2)
+	g.rce.SetScissorRect(mtl.ScissorRect{
+		Width:  dst.width,
+		Height: dst.height,
+	})
+	g.rce.DrawIndexedPrimitivesInstanced(mtl.PrimitiveTypeTriangle, m.indexCount, mtl.IndexTypeUInt32, m.ib, 0, len(instances)/graphics.VertexFloatCount)
 	return nil
 }
 
