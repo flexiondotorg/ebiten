@@ -27,6 +27,7 @@ import (
 type shaderRpsKey struct {
 	blend  graphicsdriver.Blend
 	screen bool
+	depth  bool
 }
 
 type Shader struct {
@@ -125,10 +126,12 @@ func (s *Shader) init(device mtl.Device) (err error) {
 	return nil
 }
 
-func (s *Shader) RenderPipelineState(view *view, blend graphicsdriver.Blend, screen bool) (mtl.RenderPipelineState, error) {
+// RenderPipelineState returns the render pipeline state. depth reports whether the render pass has a depth buffer.
+func (s *Shader) RenderPipelineState(view *view, blend graphicsdriver.Blend, screen bool, depth bool) (mtl.RenderPipelineState, error) {
 	key := shaderRpsKey{
 		blend:  blend,
 		screen: screen,
+		depth:  depth,
 	}
 	if rps, ok := s.rpss[key]; ok {
 		return rps, nil
@@ -154,6 +157,9 @@ func (s *Shader) RenderPipelineState(view *view, blend graphicsdriver.Blend, scr
 	rpld.ColorAttachments[0].AlphaBlendOperation = blendOperationToMetalBlendOperation(blend.BlendOperationAlpha)
 	rpld.ColorAttachments[0].RGBBlendOperation = blendOperationToMetalBlendOperation(blend.BlendOperationRGB)
 	rpld.ColorAttachments[0].WriteMask = mtl.ColorWriteMaskAll
+	if depth {
+		rpld.DepthAttachmentPixelFormat = mtl.PixelFormatDepth32Float
+	}
 
 	rps, err := view.getMTLDevice().NewRenderPipelineStateWithDescriptor(rpld)
 	if err != nil {

@@ -798,6 +798,14 @@ type DrawTrianglesShaderOptions struct {
 	// Vertex function with eight parameters. The destination must be an unmanaged image, not a sub-image.
 	// FillRule and AntiAlias are ignored.
 	Mesh *Mesh
+
+	// Depth keeps a fragment only when it is at or nearer than the depth buffer of the
+	// destination, and writes its depth. The destination gets a depth buffer on its first
+	// Depth draw. The depth buffer is cleared before the first Depth draw of the destination
+	// in each frame. Without Mesh, the destination must be an unmanaged image, not a
+	// sub-image, the shader must have a Vertex function, and only OpenGL tests the depth:
+	// the other graphics libraries draw as without Depth.
+	Depth bool
 }
 
 // Check the number of images.
@@ -909,6 +917,13 @@ func (i *Image) DrawTrianglesShader32(vertices []Vertex, indices []uint32, shade
 		if len(vertices) == 0 {
 			return
 		}
+	} else if options != nil && options.Depth {
+		if i.isSubImage() {
+			panic("ebiten: the destination must not be a sub-image with DrawTrianglesShaderOptions.Depth")
+		}
+		if !shader.userVertex {
+			panic("ebiten: the shader must have a Vertex function with DrawTrianglesShaderOptions.Depth")
+		}
 	}
 
 	if mesh == nil && len(indices) == 0 {
@@ -963,6 +978,8 @@ func (i *Image) DrawTrianglesShader32(vertices []Vertex, indices []uint32, shade
 	} else {
 		blend = options.CompositeMode.blend().internalBlend()
 	}
+	// A triangle draw carries its depth test in the blend, which every layer passes to the driver.
+	blend.DepthTest = mesh == nil && options.Depth
 
 	vs := i.ensureTmpVertices(len(vertices) * graphics.VertexFloatCount)
 	dox, doy := i.originF32()
@@ -1023,7 +1040,7 @@ func (i *Image) DrawTrianglesShader32(vertices []Vertex, indices []uint32, shade
 	i.tmpUniforms = shader.appendUniforms(i.tmpUniforms, options.Uniforms)
 
 	if mesh != nil {
-		i.image.DrawMesh(imgs, mesh.mesh, vs, blend, srcRegions, shader.shader, i.tmpUniforms)
+		i.image.DrawMesh(imgs, mesh.mesh, vs, blend, srcRegions, shader.shader, i.tmpUniforms, options.Depth)
 		return
 	}
 

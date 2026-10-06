@@ -24,8 +24,8 @@ import (
 // and finishes.
 func runFrame(f *FrameTimings, frame int64, complete bool) {
 	f.Begin(frame, float64(frame))
-	f.AddPass(frame)
-	f.AddPass(frame)
+	f.AddPass(frame, false)
+	f.AddPass(frame, true)
 	f.AddQueueWait(frame, time.Millisecond)
 	f.End(frame)
 	if complete {
@@ -57,9 +57,9 @@ func TestFrameTimingsOrder(t *testing.T) {
 	if n != 1 || dst[0].Frame != 1 {
 		t.Fatalf("got %d records %+v, want frame 1 only", n, dst[:n])
 	}
-	want := FrameTiming{Frame: 1, Start: 1, GPUStart: 1.001, GPUEnd: 1.003, GPU: 2 * time.Millisecond, QueueWait: time.Millisecond, Passes: 2}
+	want := FrameTiming{Frame: 1, Start: 1, GPUStart: 1.001, GPUEnd: 1.003, GPU: 2 * time.Millisecond, QueueWait: time.Millisecond, Passes: 2, DepthPasses: 1}
 	if got := dst[0]; got.Frame != want.Frame || got.Start != want.Start || got.GPUStart != want.GPUStart || got.GPUEnd != want.GPUEnd ||
-		(got.GPU-want.GPU).Abs() > time.Microsecond || got.QueueWait != want.QueueWait || got.Passes != want.Passes {
+		(got.GPU-want.GPU).Abs() > time.Microsecond || got.QueueWait != want.QueueWait || got.Passes != want.Passes || got.DepthPasses != want.DepthPasses {
 		t.Errorf("frame 1: got %+v, want %+v", got, want)
 	}
 	completeFrame(&f, 2)
