@@ -26,9 +26,13 @@ import (
 
 // A timer query measures the GPU time of each flush, from Begin to End, and the GPU time of a frame
 // is the sum of its flushes. The driver reads the results some frames later, when the GPU has them,
-// and never waits for them.
+// and never waits for them. In the frame that the render-pass log captures, a timer query measures
+// each render pass in place of the flushes, as only one timer query can run at a time.
 
-var _ graphicsdriver.FrameTimer = (*Graphics)(nil)
+var (
+	_ graphicsdriver.FrameTimer = (*Graphics)(nil)
+	_ graphicsdriver.PassTimer  = (*Graphics)(nil)
+)
 
 // frameQueryCount is the count of the timer queries of the flushes. A frame usually has one or two
 // flushes, and the GPU is a few frames behind.
@@ -42,7 +46,8 @@ type frameQuery struct {
 	last bool
 }
 
-// gpuTimer times the frames. Only the render thread uses it, except supported and timings.
+// gpuTimer times the frames and the render passes. Only the render thread uses it, except
+// supported and timings.
 type gpuTimer struct {
 	// supported reports whether the context has timer queries.
 	supported atomic.Bool
@@ -60,6 +65,24 @@ type gpuTimer struct {
 
 	// lastDst is the destination of the current render pass, or nil.
 	lastDst *Image
+
+	passes passTimes
+}
+
+// passTimes holds the render passes of the frame that the render-pass log captures.
+type passTimes struct {
+	// on reports whether the current frame is the timed frame.
+	on bool
+
+	// pending reports whether the GPU times of the timed frame are not read yet.
+	pending bool
+
+	// open reports whether the query of the current render pass runs.
+	open bool
+
+	frame   int64
+	queries []uint32
+	records []graphicsdriver.PassTime
 }
 
 // ReadFrameTimings implements graphicsdriver.FrameTimer. Without timer queries, it returns 0 and -1.
@@ -68,6 +91,44 @@ func (g *Graphics) ReadFrameTimings(dst []graphicsdriver.FrameTiming) (int, int6
 		return 0, -1
 	}
 	return g.timer.timings.Read(dst)
+}
+
+// TimePasses implements graphicsdriver.PassTimer.
+func (g *Graphics) TimePasses() bool {
+	if !g.timer.supported.Load() {
+		return false
+	}
+	p := &g.timer.passes
+	p.on, p.pending, p.open = true, true, false
+	p.frame = g.frame
+	p.records = p.records[:0]
+	return true
+}
+
+// ReadPassTimes implements graphicsdriver.PassTimer.
+func (g *Graphics) ReadPassTimes(dst []graphicsdriver.PassTime) ([]graphicsdriver.PassTime, bool) {
+	p := &g.timer.passes
+	if p.on {
+		return dst, false
+	}
+	if p.pending {
+		ctx := g.context.ctx
+		if n := len(p.records); n > 0 {
+			// The results of the earlier queries are available when the result of the last one is.
+			if ctx.GetQueryObjectui(p.queries[n-1], gl.QUERY_RESULT_AVAILABLE) == 0 {
+				return dst, false
+			}
+			disjoint := g.disjoint()
+			for i := range p.records {
+				ns := ctx.GetQueryObjectui(p.queries[i], gl.QUERY_RESULT)
+				if !disjoint {
+					p.records[i].GPU = time.Duration(ns)
+				}
+			}
+		}
+		p.pending = false
+	}
+	return append(dst, p.records...), true
 }
 
 // disjoint reports whether an event on OpenGL ES, such as a change of the GPU clock, makes the
@@ -84,7 +145,7 @@ func (g *Graphics) beginTiming() {
 	}
 	t.timings.Begin(g.frame, 0)
 	g.readFrameQueries()
-	if t.pending == frameQueryCount {
+	if t.passes.on || t.pending == frameQueryCount {
 		return
 	}
 	ctx := g.context.ctx
@@ -138,7 +199,13 @@ func (g *Graphics) endTiming(mode graphicsdriver.FlushMode) {
 		g.context.ctx.EndQuery(gl.TIME_ELAPSED)
 		t.active = false
 	}
-	if mode == graphicsdriver.FlushModeIntermediate || !t.timings.On() {
+	if mode == graphicsdriver.FlushModeIntermediate {
+		return
+	}
+	if t.passes.on && t.passes.frame == g.frame {
+		t.passes.on = false
+	}
+	if !t.timings.On() {
 		return
 	}
 	if q := &t.queries[(t.head+t.pending+frameQueryCount-1)%frameQueryCount]; t.pending > 0 && q.frame == g.frame {
@@ -149,22 +216,40 @@ func (g *Graphics) endTiming(mode graphicsdriver.FlushMode) {
 	t.timings.End(g.frame)
 }
 
-// beginPass counts a new render pass for a draw to dst: a new pass when the destination changes, as
-// the Metal driver starts a new render command encoder then.
+// beginPass counts a new render pass for a draw to dst, and starts its query in the timed frame.
+// The passes are those of the render-pass log: a new pass when the destination changes, as the
+// Metal driver starts a new render command encoder then.
 func (g *Graphics) beginPass(dst *Image) {
 	t := &g.timer
 	if t.lastDst == dst {
 		return
 	}
+	g.endPass()
 	t.lastDst = dst
 	if t.timings.On() {
 		t.timings.AddPass(g.frame)
 	}
+	p := &t.passes
+	if !p.on {
+		return
+	}
+	i := len(p.records)
+	if i == len(p.queries) {
+		p.queries = append(p.queries, g.context.ctx.CreateQuery())
+	}
+	g.context.ctx.BeginQuery(gl.TIME_ELAPSED, p.queries[i])
+	p.records = append(p.records, graphicsdriver.PassTime{Dst: dst.id, Width: dst.width, Height: dst.height})
+	p.open = true
 }
 
 // endPass ends the current render pass: at the end of a flush, and before a pixel read or write.
 func (g *Graphics) endPass() {
-	g.timer.lastDst = nil
+	t := &g.timer
+	t.lastDst = nil
+	if t.passes.open {
+		g.context.ctx.EndQuery(gl.TIME_ELAPSED)
+		t.passes.open = false
+	}
 }
 
 // resetTiming forgets the queries of a lost context. The frames that wait for them go out without a
@@ -172,4 +257,5 @@ func (g *Graphics) endPass() {
 func (g *Graphics) resetTiming() {
 	t := &g.timer
 	t.created, t.head, t.pending, t.active, t.lastDst = false, 0, 0, false, nil
+	t.passes = passTimes{}
 }

@@ -285,7 +285,7 @@ func (q *commandQueue) flush(graphicsDriver graphicsdriver.Graphics, mode graphi
 	}
 
 	if passLog != nil {
-		passLog.observe(q.commands, mode)
+		passLog.observe(q.commands, mode, graphicsDriver)
 	}
 
 	es := q.indices

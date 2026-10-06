@@ -123,6 +123,30 @@ type FrameTimer interface {
 	ReadFrameTimings(dst []FrameTiming) (n int, frame int64)
 }
 
+// PassTime is the GPU time of one render pass.
+type PassTime struct {
+	// Dst is the destination image of the pass, and Width and Height are its size.
+	Dst           ImageID
+	Width, Height int
+
+	// GPU is the GPU time of the command buffer of the pass on Metal, and of a timer query on
+	// OpenGL.
+	GPU time.Duration
+}
+
+// PassTimer times each render pass of one frame. A driver implements it optionally. Only the
+// render thread calls it.
+type PassTimer interface {
+	// TimePasses times the render passes of the frame that the next Begin starts, until the End
+	// of the frame, and reports false when the driver cannot time them. On Metal, each timed pass
+	// runs in its own command buffer, so the frame takes longer.
+	TimePasses() bool
+
+	// ReadPassTimes appends the pass times of the timed frame to dst in pass order, and reports
+	// false while the GPU has not completed the frame.
+	ReadPassTimes(dst []PassTime) ([]PassTime, bool)
+}
+
 // RendererNamer names the renderer of the graphics library. A driver implements it optionally.
 type RendererNamer interface {
 	// RendererName returns the renderer, the vendor, and the version that the graphics library

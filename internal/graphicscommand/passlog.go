@@ -22,6 +22,7 @@ import (
 	"os"
 	"slices"
 	"sync/atomic"
+	"time"
 
 	"github.com/hajimehoshi/ebiten/v2/internal/graphics"
 	"github.com/hajimehoshi/ebiten/v2/internal/graphicsdriver"
@@ -34,6 +35,13 @@ import (
 // pass at each flush, after a pixel write or read, and when the destination changes. The command
 // stream is the same on every graphics driver, so a run with any driver gives the passes that Metal
 // makes.
+//
+// A graphics driver that implements graphicsdriver.PassTimer (Metal and OpenGL) times each render pass
+// of the captured frame, and the log waits for the GPU to complete the frame before it writes the file
+// with the GPU time of each pass. Only the captured frame changes how the frame reaches the GPU.
+
+// passLogWait is the count of frames that a captured frame waits for the GPU times of its passes.
+const passLogWait = 120
 
 // passLog is nil when the log is off, and after the log is written. Only the render thread uses it.
 var passLog *passLogger
@@ -82,6 +90,18 @@ type passLogger struct {
 	entries []passEntry
 	passes  int
 	flushes int
+
+	// timer times the passes of the captured frame, or is nil.
+	timer graphicsdriver.PassTimer
+
+	// waiting reports whether the captured frame ended and waits for its pass times, for waited
+	// frames.
+	waiting bool
+	waited  int
+
+	// times holds the pass times of the captured frame, when timed is true.
+	times []graphicsdriver.PassTime
+	timed bool
 }
 
 // passEntry is a render pass, or a line for a command or a flush outside the render passes.
@@ -105,11 +125,20 @@ type passEntry struct {
 	region image.Rectangle
 }
 
-// observe records the commands of one flush. The commands are not executed yet.
-func (p *passLogger) observe(commands []command, mode graphicsdriver.FlushMode) {
+// observe records the commands of one flush. The commands are not executed yet. driver can be nil.
+func (p *passLogger) observe(commands []command, mode graphicsdriver.FlushMode, driver graphicsdriver.Graphics) {
+	if p.waiting {
+		p.poll(mode)
+		return
+	}
 	if !p.inFrame {
 		p.inFrame = true
 		p.capturing = p.frame == p.capture
+		if p.capturing {
+			if t, ok := driver.(graphicsdriver.PassTimer); ok && t.TimePasses() {
+				p.timer = t
+			}
+		}
 	}
 
 	// The graphics driver begins and ends at each flush, and that ends the render pass.
@@ -137,6 +166,10 @@ func (p *passLogger) observe(commands []command, mode graphicsdriver.FlushMode) 
 		p.inFrame = false
 		if p.capturing {
 			p.capturing = false
+			if p.timer != nil {
+				p.waiting = true
+				return
+			}
 			p.done()
 			return
 		}
@@ -205,6 +238,47 @@ func (p *passLogger) observeDraw(dst *Image, shader int, blend graphicsdriver.Bl
 	}
 }
 
+// poll reads the pass times of the captured frame, and writes the log when they are ready, or
+// without them after passLogWait frames.
+func (p *passLogger) poll(mode graphicsdriver.FlushMode) {
+	times, ok := p.timer.ReadPassTimes(p.times[:0])
+	p.times = times
+	if ok {
+		p.timed = true
+		p.done()
+		return
+	}
+	if mode != graphicsdriver.FlushModeIntermediate {
+		p.waited++
+	}
+	if p.waited >= passLogWait {
+		p.done()
+	}
+}
+
+// timesMatch reports whether the driver timed the passes of the log: the same count, and in each
+// pass the same size.
+func (p *passLogger) timesMatch() bool {
+	if !p.timed {
+		return false
+	}
+	var i int
+	for _, e := range p.entries {
+		if e.line != "" {
+			continue
+		}
+		if i >= len(p.times) {
+			return false
+		}
+		t := p.times[i]
+		if t.Width != e.width || t.Height != e.height {
+			return false
+		}
+		i++
+	}
+	return i == len(p.times)
+}
+
 func (p *passLogger) done() {
 	passLog = nil
 	var buf bytes.Buffer
@@ -235,7 +309,19 @@ func passTraffic(e *passEntry) (loaded, stored int64) {
 }
 
 func (p *passLogger) write(w *bytes.Buffer) {
-	fmt.Fprintf(w, "Render passes of frame %d, grouped as the Metal driver groups them\n\n", p.frame)
+	fmt.Fprintf(w, "Render passes of frame %d, grouped as the Metal driver groups them\n", p.frame)
+	joined := p.timesMatch()
+	switch {
+	case joined:
+		fmt.Fprint(w, "GPU time: the GPU time of each pass, which the graphics driver measures by itself (Metal: in its own command buffer; OpenGL: with a timer query)\n")
+	case p.timed:
+		fmt.Fprintf(w, "GPU time: the graphics driver made %d passes, which do not match the passes of the log, so they follow the summary\n", len(p.times))
+	case p.timer != nil:
+		fmt.Fprintf(w, "GPU time: none, as the GPU did not complete the frame in %d frames\n", passLogWait)
+	default:
+		fmt.Fprint(w, "GPU time: none, as the graphics driver does not time render passes\n")
+	}
+	fmt.Fprintln(w)
 
 	type group struct {
 		dst                 int
@@ -244,10 +330,12 @@ func (p *passLogger) write(w *bytes.Buffer) {
 		screen              bool
 		passes              int
 		loaded, stored      int64
+		gpu                 time.Duration
 	}
 	var groups []group
 	var passes int
 	var loaded, stored int64
+	var gpu time.Duration
 
 	for i := range p.entries {
 		e := &p.entries[i]
@@ -263,6 +351,12 @@ func (p *passLogger) write(w *bytes.Buffer) {
 		fmt.Fprintf(w, "pass %d: dst %d (%s) %dx%d", e.index, e.dst, kind, e.width, e.height)
 		if e.texWidth != e.width || e.texHeight != e.height {
 			fmt.Fprintf(w, " in a %dx%d texture", e.texWidth, e.texHeight)
+		}
+		var passGPU time.Duration
+		if joined {
+			passGPU = p.times[passes-1].GPU
+			gpu += passGPU
+			fmt.Fprintf(w, ", GPU: %.3f ms", ms(passGPU))
 		}
 		fmt.Fprintf(w, ", draws: %d, shaders:", e.draws)
 		for _, s := range e.shaders {
@@ -294,17 +388,26 @@ func (p *passLogger) write(w *bytes.Buffer) {
 		g.passes++
 		g.loaded += l
 		g.stored += s
+		g.gpu += passGPU
 	}
 
 	fmt.Fprintf(w, "\nSummary\n\n")
 	fmt.Fprintf(w, "passes: %d\n", passes)
 	fmt.Fprintf(w, "estimated bytes a frame on a tile-based GPU: loaded %.1f MB, stored %.1f MB, total %.1f MB\n", mb(loaded), mb(stored), mb(loaded+stored))
-	fmt.Fprintf(w, "(4 bytes a pixel of the whole texture; an offscreen pass loads and stores colour; a screen pass clears and stores colour)\n\n")
+	fmt.Fprintf(w, "(4 bytes a pixel of the whole texture; an offscreen pass loads and stores colour; a screen pass clears and stores colour)\n")
+	if joined {
+		fmt.Fprintf(w, "GPU time of the passes: %.3f ms\n", ms(gpu))
+	}
+	fmt.Fprintln(w)
 
 	slices.SortStableFunc(groups, func(a, b group) int {
 		return cmp.Compare(b.loaded+b.stored, a.loaded+a.stored)
 	})
-	fmt.Fprintf(w, "%6s %-24s %6s %10s %10s %10s\n", "dst", "size (texture)", "passes", "loaded MB", "stored MB", "total MB")
+	fmt.Fprintf(w, "%6s %-24s %6s %10s %10s %10s", "dst", "size (texture)", "passes", "loaded MB", "stored MB", "total MB")
+	if joined {
+		fmt.Fprintf(w, " %10s", "GPU ms")
+	}
+	fmt.Fprintln(w)
 	for _, g := range groups {
 		size := fmt.Sprintf("%dx%d", g.width, g.height)
 		if g.screen {
@@ -312,8 +415,23 @@ func (p *passLogger) write(w *bytes.Buffer) {
 		} else if g.texWidth != g.width || g.texHeight != g.height {
 			size += fmt.Sprintf(" (%dx%d)", g.texWidth, g.texHeight)
 		}
-		fmt.Fprintf(w, "%6d %-24s %6d %10.1f %10.1f %10.1f\n", g.dst, size, g.passes, mb(g.loaded), mb(g.stored), mb(g.loaded+g.stored))
+		fmt.Fprintf(w, "%6d %-24s %6d %10.1f %10.1f %10.1f", g.dst, size, g.passes, mb(g.loaded), mb(g.stored), mb(g.loaded+g.stored))
+		if joined {
+			fmt.Fprintf(w, " %10.3f", ms(g.gpu))
+		}
+		fmt.Fprintln(w)
 	}
+
+	if p.timed && !joined {
+		fmt.Fprintf(w, "\nRender passes of the graphics driver, with the image IDs of the driver\n\n")
+		for i, t := range p.times {
+			fmt.Fprintf(w, "pass %d: driver image %d %dx%d, GPU: %.3f ms\n", i+1, t.Dst, t.Width, t.Height, ms(t.GPU))
+		}
+	}
+}
+
+func ms(d time.Duration) float64 {
+	return float64(d) / float64(time.Millisecond)
 }
 
 func mb(b int64) float64 {
