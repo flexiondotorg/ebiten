@@ -386,6 +386,13 @@ type RenderPassDescriptor struct {
 
 	// StencilAttachment is state information for an attachment that stores stencil data.
 	StencilAttachment RenderPassStencilAttachment
+
+	// RenderTargetWidth and RenderTargetHeight limit the render area of the pass in pixels, when both
+	// are more than zero. They must not be more than the size of any attachment. Before macOS 10.15
+	// and iOS 11, the pass ignores them.
+	//
+	// Reference: https://developer.apple.com/documentation/metal/mtlrenderpassdescriptor/rendertargetwidth?language=objc.
+	RenderTargetWidth, RenderTargetHeight int
 }
 
 // RenderPassColorAttachmentDescriptor describes a color render target that serves
@@ -529,6 +536,8 @@ var (
 	sel_newFunctionWithName                                                                                                           = objc.RegisterName("newFunctionWithName:")
 	sel_replaceRegion_mipmapLevel_withBytes_bytesPerRow                                                                               = objc.RegisterName("replaceRegion:mipmapLevel:withBytes:bytesPerRow:")
 	sel_getBytes_bytesPerRow_fromRegion_mipmapLevel                                                                                   = objc.RegisterName("getBytes:bytesPerRow:fromRegion:mipmapLevel:")
+	sel_setRenderTargetWidth                                                                                                          = objc.RegisterName("setRenderTargetWidth:")
+	sel_setRenderTargetHeight                                                                                                         = objc.RegisterName("setRenderTargetHeight:")
 	sel_respondsToSelector                                                                                                            = objc.RegisterName("respondsToSelector:")
 )
 
@@ -836,12 +845,31 @@ func (cb CommandBuffer) RenderCommandEncoderWithDescriptor(rpd RenderPassDescrip
 	stencilAttachment.Send(sel_setLoadAction, int(rpd.StencilAttachment.LoadAction))
 	stencilAttachment.Send(sel_setStoreAction, int(rpd.StencilAttachment.StoreAction))
 	stencilAttachment.Send(sel_setTexture, rpd.StencilAttachment.Texture.texture)
+	if rpd.RenderTargetWidth > 0 && rpd.RenderTargetHeight > 0 && hasRenderTargetSize(renderPassDescriptor) {
+		renderPassDescriptor.Send(sel_setRenderTargetWidth, rpd.RenderTargetWidth)
+		renderPassDescriptor.Send(sel_setRenderTargetHeight, rpd.RenderTargetHeight)
+	}
 	var rce = cb.commandBuffer.Send(sel_renderCommandEncoderWithDescriptor, renderPassDescriptor)
 	renderPassDescriptor.Send(sel_release)
 	if rce == 0 {
 		return RenderCommandEncoder{}, errors.New("mtl: renderCommandEncoderWithDescriptor returned nil")
 	}
 	return RenderCommandEncoder{CommandEncoder{rce}}, nil
+}
+
+// renderTargetSize records whether a render pass descriptor has the render target size: 0 before
+// the first check, 1 when it has it, and 2 when it does not. Only the render thread uses it.
+var renderTargetSize int
+
+// hasRenderTargetSize reports whether rpd has the render target size, which macOS 10.15 and iOS 11 add.
+func hasRenderTargetSize(rpd objc.ID) bool {
+	if renderTargetSize == 0 {
+		renderTargetSize = 2
+		if rpd.Send(sel_respondsToSelector, sel_setRenderTargetWidth) != 0 {
+			renderTargetSize = 1
+		}
+	}
+	return renderTargetSize == 1
 }
 
 // BlitCommandEncoder creates an encoder object that can encode

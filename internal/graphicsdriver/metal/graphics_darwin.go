@@ -518,6 +518,12 @@ func (g *Graphics) draw(dst *Image, dstRegions []graphicsdriver.DstRegion, srcs 
 			rpd.ColorAttachments[0].LoadAction = mtl.LoadActionClear
 		} else {
 			rpd.ColorAttachments[0].LoadAction = mtl.LoadActionLoad
+			// The texture of an offscreen image has power-of-two sides. Limit the pass to the image,
+			// so that a tile-based GPU loads and stores only its pixels. Every scissor rectangle is
+			// inside the image. The viewport keeps the texture size, as the vertices are projected
+			// with it, and the GPU clips the fragments outside the render area.
+			rpd.RenderTargetWidth = dst.width
+			rpd.RenderTargetHeight = dst.height
 		}
 
 		// The store action should always be 'store' even for the screen (#1700).
