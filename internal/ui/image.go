@@ -253,3 +253,13 @@ func (i *Image) Fill(r, g, b, a float32, region image.Rectangle) {
 	// i.lastBlend is updated in drawTriangles.
 	i.drawTriangles(srcs, i.tmpVerticesForFill, is, blend, region, [graphics.ShaderSrcImageCount]image.Rectangle{sr}, NearestFilterShader, nil, true)
 }
+
+// ReadFrameTimings reads the GPU timing of the finished frames from the graphics driver, see
+// graphicsdriver.FrameTimer. Without a FrameTimer, it returns 0 and -1.
+func (u *UserInterface) ReadFrameTimings(dst []graphicsdriver.FrameTiming) (int, int64) {
+	d, ok := u.graphicsDriver.(graphicsdriver.FrameTimer)
+	if !ok {
+		return 0, -1
+	}
+	return d.ReadFrameTimings(dst)
+}

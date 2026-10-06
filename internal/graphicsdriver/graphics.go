@@ -16,6 +16,7 @@ package graphicsdriver
 
 import (
 	"image"
+	"time"
 
 	"github.com/hajimehoshi/ebiten/v2/internal/color"
 	"github.com/hajimehoshi/ebiten/v2/internal/graphics"
@@ -88,3 +89,36 @@ type Shader interface {
 }
 
 type ShaderID int
+
+// FrameTiming is the GPU timing of one frame of a driver.
+type FrameTiming struct {
+	// Frame is the frame number of the driver.
+	Frame int64
+
+	// Start is the host time of the frame start in seconds, on the clock of GPUStart and GPUEnd.
+	// It is zero on OpenGL.
+	Start float64
+
+	// GPUStart and GPUEnd are the host times in seconds when the GPU starts the first command
+	// buffer of the frame and ends the last one. They are zero on OpenGL.
+	GPUStart, GPUEnd float64
+
+	// GPU is the sum of the GPU times of the command buffers of the frame on Metal, and of the
+	// timer queries of the flushes of the frame on OpenGL. It is zero when the GPU time is unknown.
+	GPU time.Duration
+
+	// QueueWait is the time that the frame waits for new command buffers from the queue.
+	QueueWait time.Duration
+
+	// Passes is the count of render passes of the frame.
+	Passes int
+}
+
+// FrameTimer reports the GPU timing of each frame. A driver implements it optionally.
+type FrameTimer interface {
+	// ReadFrameTimings copies the finished frame records in frame order into dst, and returns
+	// their count and the number of the latest ended frame, or -1 before the first frame ends.
+	// A record that waits for more frames than the driver keeps goes out with its missing
+	// values at zero. The driver times the frames only after the first call.
+	ReadFrameTimings(dst []FrameTiming) (n int, frame int64)
+}
