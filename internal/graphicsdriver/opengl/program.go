@@ -245,17 +245,14 @@ type textureVariable struct {
 	native textureNative
 }
 
-func (g *Graphics) textureVariableName(idx int) string {
-	if v, ok := g.textureVariableNameCache[idx]; ok {
-		return v
+// textureVariableNames holds the names of the sampler variables of the source images.
+var textureVariableNames = func() [graphics.ShaderSrcImageCount]string {
+	var names [graphics.ShaderSrcImageCount]string
+	for i := range names {
+		names[i] = fmt.Sprintf("T%d", i)
 	}
-	if g.textureVariableNameCache == nil {
-		g.textureVariableNameCache = map[int]string{}
-	}
-	name := fmt.Sprintf("T%d", idx)
-	g.textureVariableNameCache[idx] = name
-	return name
-}
+	return names
+}()
 
 func (g *Graphics) deleteProgram(p program) {
 	// A name of a deleted program can be reused for a new program.
@@ -311,7 +308,7 @@ loop:
 		// Rebinding the same texture seems problematic (#1193).
 		for _, at := range g.activatedTextures {
 			if t.native == at.textureNative {
-				g.context.uniformInt(program, g.textureVariableName(i), at.index)
+				g.context.uniformInt(program, textureVariableNames[i], at.index)
 				continue loop
 			}
 		}
@@ -320,7 +317,7 @@ loop:
 			textureNative: t.native,
 			index:         idx,
 		})
-		g.context.uniformInt(program, g.textureVariableName(i), idx)
+		g.context.uniformInt(program, textureVariableNames[i], idx)
 		if g.state.lastActiveTexture != idx {
 			g.context.ctx.ActiveTexture(uint32(gl.TEXTURE0 + idx))
 			g.state.lastActiveTexture = idx
