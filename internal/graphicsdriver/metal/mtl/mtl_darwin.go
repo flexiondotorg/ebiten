@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"runtime"
 	"structs"
+	"sync"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
@@ -539,6 +540,8 @@ var (
 	sel_getBytes_bytesPerRow_fromRegion_mipmapLevel                                                                                   = objc.RegisterName("getBytes:bytesPerRow:fromRegion:mipmapLevel:")
 	sel_setRenderTargetWidth                                                                                                          = objc.RegisterName("setRenderTargetWidth:")
 	sel_setRenderTargetHeight                                                                                                         = objc.RegisterName("setRenderTargetHeight:")
+	sel_GPUStartTime                                                                                                                  = objc.RegisterName("GPUStartTime")
+	sel_GPUEndTime                                                                                                                    = objc.RegisterName("GPUEndTime")
 	sel_respondsToSelector                                                                                                            = objc.RegisterName("respondsToSelector:")
 )
 
@@ -800,6 +803,38 @@ func (cb CommandBuffer) Release() {
 // Reference: https://developer.apple.com/documentation/metal/mtlcommandbuffer/1443048-status?language=objc.
 func (cb CommandBuffer) Status() CommandBufferStatus {
 	return CommandBufferStatus(objcutil.Send(cb.commandBuffer, sel_status))
+}
+
+var (
+	// msgSendFloat64 sends a message without arguments that returns a double. objc.ID.Send cannot
+	// return a double, and objc.Send registers a function at every call.
+	msgSendFloat64     func(id objc.ID, sel objc.SEL) float64
+	msgSendFloat64Once sync.Once
+)
+
+func sendFloat64(id objc.ID, sel objc.SEL) float64 {
+	msgSendFloat64Once.Do(func() {
+		lib, err := purego.Dlopen("/usr/lib/libobjc.A.dylib", purego.RTLD_GLOBAL|purego.RTLD_NOW)
+		if err != nil {
+			panic(fmt.Sprintf("mtl: dlopen libobjc failed: %v", err))
+		}
+		purego.RegisterLibFunc(&msgSendFloat64, lib, "objc_msgSend")
+	})
+	return msgSendFloat64(id, sel)
+}
+
+// GPUStartTime returns the host time in seconds when the GPU starts to run the command buffer.
+//
+// Reference: https://developer.apple.com/documentation/metal/mtlcommandbuffer/gpustarttime?language=objc.
+func (cb CommandBuffer) GPUStartTime() float64 {
+	return sendFloat64(cb.commandBuffer, sel_GPUStartTime)
+}
+
+// GPUEndTime returns the host time in seconds when the GPU ends the command buffer.
+//
+// Reference: https://developer.apple.com/documentation/metal/mtlcommandbuffer/gpuendtime?language=objc.
+func (cb CommandBuffer) GPUEndTime() float64 {
+	return sendFloat64(cb.commandBuffer, sel_GPUEndTime)
 }
 
 // PresentDrawable registers a drawable presentation to occur as soon as possible.

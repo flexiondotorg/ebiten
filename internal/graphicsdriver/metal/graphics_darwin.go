@@ -21,6 +21,7 @@ import (
 	"math"
 	"runtime"
 	"slices"
+	"time"
 	"unsafe"
 
 	"github.com/ebitengine/purego/objc"
@@ -70,6 +71,9 @@ type Graphics struct {
 	freeCBs       [][]mtl.CommandBuffer
 	freeBuffers   [][]pooledBuffer
 	sortedBuffers []pooledBuffer
+
+	// timings holds the GPU timing of the latest frames, see graphicsdriver.FrameTimer.
+	timings graphicsdriver.FrameTimings
 
 	lastDst *Image
 
@@ -139,6 +143,9 @@ func (g *Graphics) Begin() error {
 	// https://developer.apple.com/library/archive/documentation/3DDrawing/Conceptual/MTLBestPracticesGuide/Drawables.html
 	g.pool = cocoa.NSAutoreleasePool_new()
 	g.view.updatePresentationState()
+	if g.timings.On() {
+		g.timings.Begin(g.frame, hostTime())
+	}
 	return nil
 }
 
@@ -147,6 +154,11 @@ func (g *Graphics) End(mode graphicsdriver.FlushMode) error {
 	g.pool.Release()
 	g.pool.ID = 0
 	if mode != graphicsdriver.FlushModeIntermediate {
+		if _, ok := g.frameToCB[g.frame]; !ok {
+			// gcBuffers finishes only a frame with command buffers.
+			g.timings.Finish(g.frame)
+		}
+		g.timings.End(g.frame)
 		g.frame++
 		g.view.endFrame()
 	}
@@ -218,8 +230,15 @@ loop:
 				continue loop
 			}
 		}
+		timed := g.timings.On()
 		for _, cb := range cbs {
+			if timed {
+				g.timings.AddGPU(frame, cb.GPUStartTime(), cb.GPUEndTime())
+			}
 			cb.Release()
+		}
+		if timed {
+			g.timings.Finish(frame)
 		}
 		delete(g.frameToCB, frame)
 		clear(cbs)
@@ -259,7 +278,15 @@ func (g *Graphics) ensureCommandBuffer() error {
 	if g.cb != (mtl.CommandBuffer{}) {
 		return nil
 	}
+	// The queue blocks when it holds its most uncompleted command buffers.
+	var t time.Time
+	if timed := g.timings.On(); timed {
+		t = time.Now()
+	}
 	cb, err := g.cq.CommandBuffer()
+	if !t.IsZero() {
+		g.timings.AddQueueWait(g.frame, time.Since(t))
+	}
 	if err != nil {
 		return fmt.Errorf("metal: cq.CommandBuffer failed: %w", err)
 	}
@@ -581,6 +608,9 @@ func (g *Graphics) draw(dst *Image, dstRegions []graphicsdriver.DstRegion, srcs 
 			return fmt.Errorf("metal: cb.RenderCommandEncoderWithDescriptor failed: %w", err)
 		}
 		g.rce = rce
+		if g.timings.On() {
+			g.timings.AddPass(g.frame)
+		}
 	}
 
 	w, h := dst.internalSize()
@@ -1022,4 +1052,11 @@ func appendUniformVariables(values []uint32, uniformTypes []shaderir.Type, unifo
 	}
 
 	return fillZerosToFitAlignment(values, structAlign)
+}
+
+var _ graphicsdriver.FrameTimer = (*Graphics)(nil)
+
+// ReadFrameTimings implements graphicsdriver.FrameTimer.
+func (g *Graphics) ReadFrameTimings(dst []graphicsdriver.FrameTiming) (int, int64) {
+	return g.timings.Read(dst)
 }
