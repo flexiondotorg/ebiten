@@ -68,7 +68,7 @@ type Graphics struct {
 	// The cache is accessed on the render thread.
 	pixelPackBuffers readbackcache.Cache[int, buffer]
 
-	// frame counts the ended frames, for the GPU timing.
+	// frame counts the ended frames, for the GPU timing and the depth clear of each frame.
 	frame int64
 
 	// timer is the GPU timing of the frames, see graphicsdriver.FrameTimer.
@@ -244,8 +244,14 @@ func (g *Graphics) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphics.
 		return err
 	}
 	if len(dstRegions) > 0 {
-		g.beginPass(destination)
+		g.beginPass(destination, blend.DepthTest)
 	}
+	if blend.DepthTest {
+		if err := destination.useDepth(); err != nil {
+			return err
+		}
+	}
+	g.setDepthTest(blend.DepthTest)
 
 	for _, dstRegion := range dstRegions {
 		g.context.ctx.Scissor(

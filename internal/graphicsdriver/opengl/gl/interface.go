@@ -40,6 +40,7 @@ type Context interface {
 	BindAttribLocation(program uint32, index uint32, name string)
 	BindBuffer(target uint32, buffer uint32)
 	BindFramebuffer(target uint32, framebuffer uint32)
+	BindRenderbuffer(target uint32, renderbuffer uint32)
 	BindTexture(target uint32, texture uint32)
 	BindVertexArray(array uint32)
 	BlendEquationSeparate(modeRGB uint32, modeAlpha uint32)
@@ -47,22 +48,27 @@ type Context interface {
 	BufferInit(target uint32, size int, usage uint32)
 	BufferSubData(target uint32, offset int, data []byte)
 	CheckFramebufferStatus(target uint32) uint32
+	Clear(mask uint32)
 	ClientWaitSync(sync uintptr, flags uint32, timeout uint64) uint32
 	CompileShader(shader uint32)
 	CreateBuffer() uint32
 	CreateFramebuffer() uint32
 	CreateProgram() uint32
 	CreateQuery() uint32
+	CreateRenderbuffer() uint32
 	CreateShader(xtype uint32) uint32
 	CreateTexture() uint32
 	CreateVertexArray() uint32
 	DeleteBuffer(buffer uint32)
 	DeleteFramebuffer(framebuffer uint32)
 	DeleteProgram(program uint32)
+	DeleteRenderbuffer(renderbuffer uint32)
 	DeleteShader(shader uint32)
 	DeleteSync(sync uintptr)
 	DeleteTexture(texture uint32)
 	DeleteVertexArray(array uint32)
+	DepthFunc(xfunc uint32)
+	Disable(cap uint32)
 	DrawElements(mode uint32, count int32, xtype uint32, offset int)
 	DrawElementsInstanced(mode uint32, count int32, xtype uint32, offset int, instanceCount int32)
 	Enable(cap uint32)
@@ -71,6 +77,7 @@ type Context interface {
 	FenceSync(condition uint32, flags uint32) uintptr
 	Finish()
 	Flush()
+	FramebufferRenderbuffer(target uint32, attachment uint32, renderbuffertarget uint32, renderbuffer uint32)
 	FramebufferTexture2D(target uint32, attachment uint32, textarget uint32, texture uint32, level int32)
 	GetBufferSubData(target uint32, offset int, data []byte)
 	GetError() uint32
@@ -87,6 +94,7 @@ type Context interface {
 	MapBufferRange(target uint32, offset int, length int, access uint32) []byte
 	PixelStorei(pname uint32, param int32)
 	ReadPixels(dst []byte, x int32, y int32, width int32, height int32, format uint32, xtype uint32)
+	RenderbufferStorage(target uint32, internalformat uint32, width int32, height int32)
 	Scissor(x, y, width, height int32)
 	ShaderSource(shader uint32, xstring string)
 	TexImage2D(target uint32, level int32, internalformat int32, width int32, height int32, format uint32, xtype uint32, pixels []byte)

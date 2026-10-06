@@ -95,15 +95,15 @@ func newTimedGraphics() (*Graphics, *queryContext) {
 	return g, c
 }
 
-// runTimedFrame runs a frame with two flushes, and in them three render passes.
+// runTimedFrame runs a frame with two flushes, and in them three render passes, one with depth.
 func runTimedFrame(g *Graphics, a, b *Image) {
 	g.beginTiming()
-	g.beginPass(a)
-	g.beginPass(a)
-	g.beginPass(b)
+	g.beginPass(a, false)
+	g.beginPass(a, false)
+	g.beginPass(b, true)
 	g.endTiming(graphicsdriver.FlushModeIntermediate)
 	g.beginTiming()
-	g.beginPass(b)
+	g.beginPass(b, false)
 	g.endTiming(graphicsdriver.FlushModeEndFrame)
 	g.frame++
 }
@@ -129,7 +129,7 @@ func TestFrameTimings(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("got %d records, want 1", n)
 	}
-	want := graphicsdriver.FrameTiming{Frame: 1, GPU: 7 * time.Millisecond, Passes: 3}
+	want := graphicsdriver.FrameTiming{Frame: 1, GPU: 7 * time.Millisecond, Passes: 3, DepthPasses: 1}
 	if dst[0] != want {
 		t.Errorf("got %+v, want %+v", dst[0], want)
 	}
@@ -159,7 +159,7 @@ func TestPassTimes(t *testing.T) {
 	// the 5th.
 	want := []graphicsdriver.PassTime{
 		{Dst: 1, Width: 64, Height: 32, GPU: 3 * time.Millisecond},
-		{Dst: 2, Width: 128, Height: 64, GPU: 4 * time.Millisecond},
+		{Dst: 2, Width: 128, Height: 64, Depth: true, GPU: 4 * time.Millisecond},
 		{Dst: 2, Width: 128, Height: 64, GPU: 5 * time.Millisecond},
 	}
 	if len(times) != len(want) {
