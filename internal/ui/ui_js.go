@@ -146,6 +146,11 @@ var (
 var (
 	documentHasFocus = document.Get("hasFocus").Call("bind", document)
 	documentHidden   = js.Global().Get("Object").Call("getOwnPropertyDescriptor", js.Global().Get("Document").Get("prototype"), "hidden").Get("get").Call("bind", document)
+
+	// bodyClientWidth and bodyClientHeight return numbers, so that reading the size of the body in each frame
+	// gets no JavaScript object, and so makes no allocation, in Go.
+	bodyClientWidth  = js.Global().Get("Function").New("return document.body.clientWidth")
+	bodyClientHeight = js.Global().Get("Function").New("return document.body.clientHeight")
 )
 
 func (u *UserInterface) SetFullscreen(fullscreen bool) {
@@ -291,10 +296,7 @@ func (u *UserInterface) SetCursorShape(shape CursorShape) {
 
 func (u *UserInterface) outsideSize() (float64, float64) {
 	if document.Truthy() {
-		body := document.Get("body")
-		bw := body.Get("clientWidth").Float()
-		bh := body.Get("clientHeight").Float()
-		return bw, bh
+		return bodyClientWidth.Invoke().Float(), bodyClientHeight.Invoke().Float()
 	}
 
 	// Node.js
@@ -405,6 +407,9 @@ func (u *UserInterface) loopGame() error {
 	g, ctx := errgroup.WithContext(stdcontext.Background())
 
 	var cf js.Func
+	// call calls cf with no receiver and no arguments. setTimeout passes the window as the receiver, and
+	// requestAnimationFrame also passes a time stamp, and Go allocates for each in each frame.
+	var call js.Value
 	f := func() error {
 		if ctx.Err() != nil {
 			return nil
@@ -422,11 +427,11 @@ func (u *UserInterface) loopGame() error {
 		}
 		switch u.FPSMode() {
 		case FPSModeVsyncOn:
-			requestAnimationFrame.Invoke(cf)
+			requestAnimationFrame.Invoke(call)
 		case FPSModeVsyncOffMaximum:
-			setTimeout.Invoke(cf, 0)
+			setTimeout.Invoke(call, 0)
 		case FPSModeVsyncOffMinimum:
-			requestAnimationFrame.Invoke(cf)
+			requestAnimationFrame.Invoke(call)
 		}
 		return nil
 	}
@@ -437,6 +442,7 @@ func (u *UserInterface) loopGame() error {
 		g.Go(f)
 		return nil
 	})
+	call = js.Global().Get("Function").New("f", "return () => f()").Invoke(cf)
 
 	// Run the first frame asynchronously so that the audio watcher below starts right away.
 	g.Go(f)

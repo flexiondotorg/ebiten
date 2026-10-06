@@ -26,6 +26,16 @@ import (
 
 var (
 	object = js.Global().Get("Object")
+
+	// connectedGamepads returns the number of connected gamepads, or -1 when navigator.getGamepads is not
+	// available. It returns a number, so a frame with no gamepad gets no JavaScript object, and so no
+	// allocation, from the browser.
+	connectedGamepads = js.Global().Get("Function").New(`const n = globalThis.navigator;
+if (!n || !n.getGamepads) return -1;
+const gps = n.getGamepads();
+let c = 0;
+if (gps) for (let i = 0; i < gps.length; i++) if (gps[i]) c++;
+return c;`)
 )
 
 var warnGetGamepadsOnce sync.Once
@@ -48,6 +58,12 @@ func (g *nativeGamepadsImpl) update(gamepads *gamepads) error {
 	defer func() {
 		clear(g.indices)
 	}()
+
+	// With no gamepad, remove the gamepads that were connected, and ask the browser for no object.
+	if connectedGamepads.Invoke().Int() == 0 {
+		gamepads.remove(func(*Gamepad) bool { return true })
+		return nil
+	}
 
 	nav := js.Global().Get("navigator")
 	if !nav.Truthy() {
