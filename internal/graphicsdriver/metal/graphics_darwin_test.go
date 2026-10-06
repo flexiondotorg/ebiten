@@ -120,14 +120,14 @@ func TestTakeUnusedBuffer(t *testing.T) {
 	if err != nil {
 		t.Skipf("Metal device unavailable: %v", err)
 	}
-	buffers := make(map[mtl.Buffer]struct{})
+	buffers := make(map[mtl.Buffer]uintptr)
 	for _, length := range []uintptr{256, 1024, 4096} {
 		buffer, err := device.NewBufferWithLength(length, mtl.ResourceStorageModeShared)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer buffer.Release()
-		buffers[buffer] = struct{}{}
+		buffers[buffer] = length
 	}
 	for _, want := range []uintptr{1024, 4096, 0} {
 		buffer := metal.TakeUnusedBuffer(buffers, 512)
