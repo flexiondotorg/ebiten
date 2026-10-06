@@ -17,6 +17,7 @@
 package opengl
 
 import (
+	"errors"
 	"unsafe"
 
 	"github.com/hajimehoshi/ebiten/v2/internal/graphics"
@@ -43,6 +44,20 @@ type meshDrawState struct {
 	vertexArray   uint32
 	scissorWidth  int
 	scissorHeight int
+}
+
+// setDepthTest turns the depth test on or off. Each draw sets it, so that it is off for a draw without depth.
+func (g *Graphics) setDepthTest(on bool) {
+	if g.state.depthTest == on {
+		return
+	}
+	if on {
+		g.context.ctx.Enable(gl.DEPTH_TEST)
+		g.context.ctx.DepthFunc(gl.LEQUAL)
+	} else {
+		g.context.ctx.Disable(gl.DEPTH_TEST)
+	}
+	g.state.depthTest = on
 }
 
 // endMeshDraws binds the vertex array and the array buffer of the batches again, for DrawTriangles and SetVertices.
@@ -105,7 +120,7 @@ func (g *Graphics) NewMesh(id graphicsdriver.MeshID, vertices []float32, indices
 	return nil
 }
 
-func (g *Graphics) DrawMesh(dstID graphicsdriver.ImageID, srcIDs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, meshID graphicsdriver.MeshID, instances []float32, blend graphicsdriver.Blend, uniforms []uint32) error {
+func (g *Graphics) DrawMesh(dstID graphicsdriver.ImageID, srcIDs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, meshID graphicsdriver.MeshID, instances []float32, blend graphicsdriver.Blend, uniforms []uint32, depth bool) error {
 	// A mesh from before a context loss is unknown, and draws nothing.
 	m, ok := g.state.meshes[meshID]
 	if !ok || len(instances) == 0 {
@@ -148,6 +163,14 @@ func (g *Graphics) DrawMesh(dstID graphicsdriver.ImageID, srcIDs [graphics.Shade
 		m.instanceBuffer = g.state.instanceBufferGeneration
 	}
 
+	g.beginPass(destination, depth)
+	if depth {
+		if err := destination.useDepth(); err != nil {
+			return err
+		}
+	}
+	g.setDepthTest(depth)
+
 	if s.vertexArray == 0 || s.scissorWidth != destination.width || s.scissorHeight != destination.height {
 		g.context.ctx.Scissor(0, 0, int32(destination.width), int32(destination.height))
 	}
@@ -160,7 +183,40 @@ func (g *Graphics) DrawMesh(dstID graphicsdriver.ImageID, srcIDs [graphics.Shade
 		scissorHeight: destination.height,
 	}
 
-	g.beginPass(destination)
+	return nil
+}
 
+// DiscardDepth invalidates the depth attachment of dst when the context can and dst is still bound.
+func (g *Graphics) DiscardDepth(dstID graphicsdriver.ImageID) {
+	c, ok := g.context.ctx.(interface{ InvalidateDepth() })
+	if i := g.images[dstID]; ok && i != nil && i.depthBuffer != 0 && i.framebuffer != nil && g.context.lastFramebuffer == i.framebuffer.native {
+		c.InvalidateDepth()
+	}
+}
+
+// useDepth gives the image a depth buffer on its first use, and clears the depth buffer on its first use in a frame.
+// The framebuffer of the image must be bound.
+func (i *Image) useDepth() error {
+	c := &i.graphics.context
+	clearDepth := i.depthFrame != i.graphics.frame
+	if i.depthBuffer == 0 {
+		r := c.ctx.CreateRenderbuffer()
+		if r <= 0 {
+			return errors.New("opengl: creating depth renderbuffer failed")
+		}
+		i.depthBuffer = renderbufferNative(r)
+		c.bindRenderbuffer(i.depthBuffer)
+		w, h := i.viewportSize()
+		c.ctx.RenderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, int32(w), int32(h))
+		c.ctx.FramebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, uint32(i.depthBuffer))
+		clearDepth = true
+	}
+	if clearDepth {
+		// The scissor test would clip the clear.
+		c.ctx.Disable(gl.SCISSOR_TEST)
+		c.ctx.Clear(gl.DEPTH_BUFFER_BIT)
+		c.ctx.Enable(gl.SCISSOR_TEST)
+		i.depthFrame = i.graphics.frame
+	}
 	return nil
 }

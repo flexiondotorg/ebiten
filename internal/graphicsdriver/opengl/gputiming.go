@@ -217,17 +217,19 @@ func (g *Graphics) endTiming(mode graphicsdriver.FlushMode) {
 }
 
 // beginPass counts a new render pass for a draw to dst, and starts its query in the timed frame.
-// The passes are those of the render-pass log: a new pass when the destination changes, as the
-// Metal driver starts a new render command encoder then.
-func (g *Graphics) beginPass(dst *Image) {
+// The passes are those of the render-pass log: a new pass when the destination changes, and when a
+// depth draw clears the depth buffer, as the Metal driver starts a new render command encoder then.
+func (g *Graphics) beginPass(dst *Image, depth bool) {
 	t := &g.timer
-	if t.lastDst == dst {
+	clearDepth := depth && dst.depthFrame != g.frame
+	if t.lastDst == dst && !clearDepth {
 		return
 	}
 	g.endPass()
 	t.lastDst = dst
+	hasDepth := depth || dst.depthBuffer != 0
 	if t.timings.On() {
-		t.timings.AddPass(g.frame)
+		t.timings.AddPass(g.frame, hasDepth)
 	}
 	p := &t.passes
 	if !p.on {
@@ -238,7 +240,7 @@ func (g *Graphics) beginPass(dst *Image) {
 		p.queries = append(p.queries, g.context.ctx.CreateQuery())
 	}
 	g.context.ctx.BeginQuery(gl.TIME_ELAPSED, p.queries[i])
-	p.records = append(p.records, graphicsdriver.PassTime{Dst: dst.id, Width: dst.width, Height: dst.height})
+	p.records = append(p.records, graphicsdriver.PassTime{Dst: dst.id, Width: dst.width, Height: dst.height, Depth: hasDepth})
 	p.open = true
 }
 

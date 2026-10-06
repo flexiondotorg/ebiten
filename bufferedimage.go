@@ -199,7 +199,7 @@ func (b *bufferedImage) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*buffer
 }
 
 // DrawMesh draws the mesh once for each instance record.
-func (b *bufferedImage) DrawMesh(srcs [graphics.ShaderSrcImageCount]*bufferedImage, mesh *graphicscommand.Mesh, instances []float32, blend graphicsdriver.Blend, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *ui.Shader, uniforms []uint32) {
+func (b *bufferedImage) DrawMesh(srcs [graphics.ShaderSrcImageCount]*bufferedImage, mesh *graphicscommand.Mesh, instances []float32, blend graphicsdriver.Blend, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *ui.Shader, uniforms []uint32, depth bool) {
 	var imgs [graphics.ShaderSrcImageCount]*ui.Image
 	for i, src := range srcs {
 		if src == nil {
@@ -216,7 +216,7 @@ func (b *bufferedImage) DrawMesh(srcs [graphics.ShaderSrcImageCount]*bufferedIma
 	defer b.mu.Unlock()
 
 	b.cache.writeBackPixelsIfNeeded(b.image)
-	b.image.DrawMesh(imgs, mesh, instances, blend, srcRegions, shader, uniforms)
+	b.image.DrawMesh(imgs, mesh, instances, blend, srcRegions, shader, uniforms, depth)
 	b.cache.reset()
 }
 

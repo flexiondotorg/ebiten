@@ -48,6 +48,10 @@ func _ID3D12CommandQueue_SuspendX(i *_ID3D12CommandQueue, flags uint32) uintptr 
 	panic("not implemented")
 }
 
+func _ID3D12GraphicsCommandList_ClearDepthStencilView(i *_ID3D12GraphicsCommandList, depthStencilView _D3D12_CPU_DESCRIPTOR_HANDLE, clearFlags _D3D12_CLEAR_FLAGS, depth float32, stencil uint8, rects []_D3D12_RECT) {
+	panic("not implemented")
+}
+
 func _ID3D12GraphicsCommandList_Close(i *_ID3D12GraphicsCommandList) uintptr {
 	panic("not implemented")
 }
