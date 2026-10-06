@@ -58,42 +58,46 @@ type drawTrianglesCommand struct {
 	firstCaller string
 }
 
-func (c *drawTrianglesCommand) String() string {
-	var blend string
-	switch c.blend {
+// blendString returns the name of a predefined blend, or its factors and operations.
+func blendString(b graphicsdriver.Blend) string {
+	switch b {
 	case graphicsdriver.BlendSourceOver:
-		blend = "(source-over)"
+		return "(source-over)"
 	case graphicsdriver.BlendClear:
-		blend = "(clear)"
+		return "(clear)"
 	case graphicsdriver.BlendCopy:
-		blend = "(copy)"
+		return "(copy)"
 	case graphicsdriver.BlendDestination:
-		blend = "(destination)"
+		return "(destination)"
 	case graphicsdriver.BlendSourceIn:
-		blend = "(source-in)"
+		return "(source-in)"
 	case graphicsdriver.BlendDestinationIn:
-		blend = "(destination-in)"
+		return "(destination-in)"
 	case graphicsdriver.BlendSourceOut:
-		blend = "(source-out)"
+		return "(source-out)"
 	case graphicsdriver.BlendDestinationOut:
-		blend = "(destination-out)"
+		return "(destination-out)"
 	case graphicsdriver.BlendSourceAtop:
-		blend = "(source-atop)"
+		return "(source-atop)"
 	case graphicsdriver.BlendDestinationAtop:
-		blend = "(destination-atop)"
+		return "(destination-atop)"
 	case graphicsdriver.BlendXor:
-		blend = "(xor)"
+		return "(xor)"
 	case graphicsdriver.BlendLighter:
-		blend = "(lighter)"
+		return "(lighter)"
 	default:
-		blend = fmt.Sprintf("{src-rgb: %d, src-alpha: %d, dst-rgb: %d, dst-alpha: %d, op-rgb: %d, op-alpha: %d}",
-			c.blend.BlendFactorSourceRGB,
-			c.blend.BlendFactorSourceAlpha,
-			c.blend.BlendFactorDestinationRGB,
-			c.blend.BlendFactorDestinationAlpha,
-			c.blend.BlendOperationRGB,
-			c.blend.BlendOperationAlpha)
+		return fmt.Sprintf("{src-rgb: %d, src-alpha: %d, dst-rgb: %d, dst-alpha: %d, op-rgb: %d, op-alpha: %d}",
+			b.BlendFactorSourceRGB,
+			b.BlendFactorSourceAlpha,
+			b.BlendFactorDestinationRGB,
+			b.BlendFactorDestinationAlpha,
+			b.BlendOperationRGB,
+			b.BlendOperationAlpha)
 	}
+}
+
+func (c *drawTrianglesCommand) String() string {
+	blend := blendString(c.blend)
 
 	dst := fmt.Sprintf("%d", c.dst.id)
 	if c.dst.screen {

@@ -18,6 +18,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/hajimehoshi/ebiten/v2/internal/graphicscommand"
 	"github.com/hajimehoshi/ebiten/v2/internal/graphicsdriver"
 	"github.com/hajimehoshi/ebiten/v2/internal/ui"
 )
@@ -62,4 +63,12 @@ var _ = graphicsdriver.FrameTiming(FrameTiming{})
 func ReadFrameTimings(dst []FrameTiming) (n int, frame int64) {
 	d := unsafe.Slice((*graphicsdriver.FrameTiming)(unsafe.Pointer(unsafe.SliceData(dst))), len(dst))
 	return ui.Get().ReadFrameTimings(d)
+}
+
+// CaptureRenderPasses asks for the render-pass log of one frame soon after the call, written to the
+// file at path: the render passes of the frame as the Metal driver groups them, with a summary for
+// each destination image. The file appears whole when the log is complete. The capture waits while
+// another capture runs, and a later call replaces a call that waits.
+func CaptureRenderPasses(path string) {
+	graphicscommand.RequestPassLog(path)
 }
