@@ -55,8 +55,17 @@ type Graphics struct {
 	// frameToCB keeps command buffers not to be released until the command buffers are completed.
 	frameToCB map[int64][]mtl.CommandBuffer
 
-	buffers       map[int64][]mtl.Buffer
-	unusedBuffers map[mtl.Buffer]struct{}
+	// buffers maps a frame number to the buffers used in the frame.
+	buffers map[int64][]pooledBuffer
+
+	// unusedBuffers maps a buffer that no frame uses to its length.
+	unusedBuffers map[mtl.Buffer]uintptr
+
+	// freeCBs, freeBuffers, and sortedBuffers keep the slices of the completed frames and the sort
+	// of unusedBuffers, so that a frame does not allocate them.
+	freeCBs       [][]mtl.CommandBuffer
+	freeBuffers   [][]pooledBuffer
+	sortedBuffers []pooledBuffer
 
 	lastDst *Image
 
@@ -175,6 +184,12 @@ func pow2(x uintptr) uintptr {
 	return p2
 }
 
+// pooledBuffer is a buffer of the pool with its length, so that the pool does not ask Metal for it.
+type pooledBuffer struct {
+	buf    mtl.Buffer
+	length uintptr
+}
+
 // isCommandBufferFinished reports whether the command buffer has finished executing, whether
 // successfully or with an error.
 func isCommandBufferFinished(status mtl.CommandBufferStatus) bool {
@@ -203,29 +218,36 @@ loop:
 			cb.Release()
 		}
 		delete(g.frameToCB, frame)
+		clear(cbs)
+		g.freeCBs = append(g.freeCBs, cbs[:0])
 
-		for _, b := range g.buffers[frame] {
-			if g.unusedBuffers == nil {
-				g.unusedBuffers = map[mtl.Buffer]struct{}{}
+		if bufs, ok := g.buffers[frame]; ok {
+			for _, b := range bufs {
+				if g.unusedBuffers == nil {
+					g.unusedBuffers = map[mtl.Buffer]uintptr{}
+				}
+				g.unusedBuffers[b.buf] = b.length
 			}
-			g.unusedBuffers[b] = struct{}{}
+			delete(g.buffers, frame)
+			g.freeBuffers = append(g.freeBuffers, bufs[:0])
 		}
-		delete(g.buffers, frame)
 	}
 
 	const maxUnusedBuffers = 10
 	if len(g.unusedBuffers) > maxUnusedBuffers {
-		bufs := make([]mtl.Buffer, 0, len(g.unusedBuffers))
-		for b := range g.unusedBuffers {
-			bufs = append(bufs, b)
+		bufs := g.sortedBuffers[:0]
+		for b, l := range g.unusedBuffers {
+			bufs = append(bufs, pooledBuffer{buf: b, length: l})
 		}
-		slices.SortFunc(bufs, func(a, b mtl.Buffer) int {
-			return cmp.Compare(b.Length(), a.Length())
+		slices.SortFunc(bufs, func(a, b pooledBuffer) int {
+			return cmp.Compare(b.length, a.length)
 		})
 		for _, b := range bufs[maxUnusedBuffers:] {
-			delete(g.unusedBuffers, b)
-			b.Release()
+			delete(g.unusedBuffers, b.buf)
+			b.buf.Release()
 		}
+		clear(bufs)
+		g.sortedBuffers = bufs[:0]
 	}
 }
 
@@ -241,7 +263,12 @@ func (g *Graphics) ensureCommandBuffer() error {
 	if g.frameToCB == nil {
 		g.frameToCB = map[int64][]mtl.CommandBuffer{}
 	}
-	g.frameToCB[g.frame] = append(g.frameToCB[g.frame], g.cb)
+	cbs, ok := g.frameToCB[g.frame]
+	if !ok && len(g.freeCBs) > 0 {
+		cbs = g.freeCBs[len(g.freeCBs)-1]
+		g.freeCBs = g.freeCBs[:len(g.freeCBs)-1]
+	}
+	g.frameToCB[g.frame] = append(cbs, g.cb)
 	g.cb.Retain()
 	return nil
 }
@@ -251,28 +278,34 @@ func (g *Graphics) availableBuffer(length uintptr) (mtl.Buffer, error) {
 		return mtl.Buffer{}, err
 	}
 
-	var newBuf mtl.Buffer
-	for b := range g.unusedBuffers {
-		if b.Length() >= length {
-			newBuf = b
+	var newBuf pooledBuffer
+	for b, l := range g.unusedBuffers {
+		if l >= length {
+			newBuf = pooledBuffer{buf: b, length: l}
 			delete(g.unusedBuffers, b)
 			break
 		}
 	}
 
-	if newBuf == (mtl.Buffer{}) {
-		b, err := g.view.getMTLDevice().NewBufferWithLength(pow2(length), resourceStorageMode)
+	if newBuf.buf == (mtl.Buffer{}) {
+		newBuf.length = pow2(length)
+		b, err := g.view.getMTLDevice().NewBufferWithLength(newBuf.length, resourceStorageMode)
 		if err != nil {
 			return mtl.Buffer{}, fmt.Errorf("metal: device.NewBufferWithLength failed: %w", err)
 		}
-		newBuf = b
+		newBuf.buf = b
 	}
 
 	if g.buffers == nil {
-		g.buffers = map[int64][]mtl.Buffer{}
+		g.buffers = map[int64][]pooledBuffer{}
 	}
-	g.buffers[g.frame] = append(g.buffers[g.frame], newBuf)
-	return newBuf, nil
+	bufs, ok := g.buffers[g.frame]
+	if !ok && len(g.freeBuffers) > 0 {
+		bufs = g.freeBuffers[len(g.freeBuffers)-1]
+		g.freeBuffers = g.freeBuffers[:len(g.freeBuffers)-1]
+	}
+	g.buffers[g.frame] = append(bufs, newBuf)
+	return newBuf.buf, nil
 }
 
 func (g *Graphics) SetVertices(vertices []float32, indices []uint32) error {
