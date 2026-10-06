@@ -173,3 +173,76 @@ fragment float4 FragmentShader(VertexOut in [[stage_in]], constant float4& color
 		}
 	}
 }
+
+// TestRenderPassDescriptorCache checks that the encoders of a cache follow the load action and the
+// clear color of each pass, and that a pass with a cached descriptor does not allocate.
+func TestRenderPassDescriptorCache(t *testing.T) {
+	device, err := mtl.CreateSystemDefaultDevice()
+	if err != nil {
+		t.Skip(err)
+	}
+
+	const size = 4
+	texture, err := device.NewTextureWithDescriptor(mtl.TextureDescriptor{
+		TextureType: mtl.TextureType2D,
+		PixelFormat: mtl.PixelFormatRGBA8UNorm,
+		Width:       size,
+		Height:      size,
+		StorageMode: mtl.StorageModeManaged,
+		Usage:       mtl.TextureUsageShaderRead | mtl.TextureUsageRenderTarget,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cq, err := device.NewCommandQueue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cb, err := cq.CommandBuffer()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var c mtl.RenderPassDescriptorCache
+	defer c.Release()
+	pass := func(load mtl.LoadAction, clear mtl.ClearColor) {
+		var rpd mtl.RenderPassDescriptor
+		rpd.ColorAttachments[0].LoadAction = load
+		rpd.ColorAttachments[0].StoreAction = mtl.StoreActionStore
+		rpd.ColorAttachments[0].ClearColor = clear
+		rpd.ColorAttachments[0].Texture = texture
+		rpd.RenderTargetWidth = size
+		rpd.RenderTargetHeight = size
+		rce, err := cb.RenderCommandEncoderWithDescriptorCache(&c, rpd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rce.EndEncoding()
+	}
+	pass(mtl.LoadActionClear, mtl.ClearColor{Green: 1, Alpha: 1})
+	pass(mtl.LoadActionClear, mtl.ClearColor{Red: 1, Alpha: 1})
+	if n := testing.AllocsPerRun(10, func() {
+		pass(mtl.LoadActionLoad, mtl.ClearColor{Red: 1, Alpha: 1})
+	}); n != 0 {
+		t.Errorf("allocations: got %v, want 0", n)
+	}
+
+	bce, err := cb.BlitCommandEncoder()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bce.Synchronize(texture)
+	bce.EndEncoding()
+	cb.Commit()
+	cb.WaitUntilCompleted()
+
+	pixels := make([]byte, 4*size*size)
+	if err := texture.GetBytes(pixels, 4*size, mtl.RegionMake2D(0, 0, size, size), 0); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < len(pixels); i += 4 {
+		if got, want := pixels[i:i+4], []byte{0xff, 0, 0, 0xff}; string(got) != string(want) {
+			t.Fatalf("pixel %d: got %v, want %v", i/4, got, want)
+		}
+	}
+}
