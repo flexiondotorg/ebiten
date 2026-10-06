@@ -242,13 +242,13 @@ func doDrawTrianglesWithAntialias(dst *Image, vertices []Vertex, indices []uint3
 		if dtOptions.CompositeMode != CompositeModeCustom {
 			uncommonBlend = dtOptions.CompositeMode != CompositeModeSourceOver
 		} else {
-			uncommonBlend = dtOptions.Blend != BlendSourceOver
+			uncommonBlend = dtOptions.Blend.internalBlend() != defaultBlendInternalBlend
 		}
 	} else if dtsOptions != nil {
 		if dtsOptions.CompositeMode != CompositeModeCustom {
 			uncommonBlend = dtsOptions.CompositeMode != CompositeModeSourceOver
 		} else {
-			uncommonBlend = dtsOptions.Blend != BlendSourceOver
+			uncommonBlend = dtsOptions.Blend.internalBlend() != defaultBlendInternalBlend
 		}
 	}
 
