@@ -71,6 +71,9 @@ type Program struct {
 	// Kage source.
 	FragmentSource []byte
 
+	// UserVertex reports whether VertexFunc comes from the source's own Vertex function instead of the builtin one.
+	UserVertex bool
+
 	// unusedUniformDwords holds the ranges [start, end) of the uniform dwords that the program never reads,
 	// in the order of the dwords. It is valid when unusedUniformDwordsReady is true.
 	unusedUniformDwords      [][2]int

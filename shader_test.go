@@ -3406,3 +3406,72 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
 	s0.Dispose()
 	s1.Dispose()
 }
+
+func TestShaderUserVertex(t *testing.T) {
+	const w, h = 32, 32
+
+	// Put dst next to another image on the same atlas, so that dst's origin is not (0, 0).
+	other := ebiten.NewImage(w, h)
+	other.Fill(color.White)
+
+	s, err := ebiten.NewShader([]byte(`//kage:unit pixels
+
+package main
+
+var Model mat4
+
+func Vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4) (vec4, vec2, vec4, vec4) {
+	pos := Model * vec4(dstPos, 0, 1)
+	return imageDstProjection() * vec4(pos.xy+imageDstOrigin()*pos.w, pos.z, pos.w), srcPos, color, custom
+}
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+	return color
+}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A square from (-1, -1) to (1, 1) in model space, as a triangle list.
+	var vs []ebiten.Vertex
+	for _, p := range [][2]float32{{-1, -1}, {1, -1}, {-1, 1}, {1, -1}, {1, 1}, {-1, 1}} {
+		vs = append(vs, ebiten.Vertex{
+			DstX:   p[0],
+			DstY:   p[1],
+			ColorR: 1,
+			ColorA: 1,
+		})
+	}
+	op := &ebiten.DrawTrianglesShaderOptions{}
+	// Model scales by 16, translates by (24, 40), and sets w to 2 in column-major order.
+	// After the division by w, the square covers (4, 12) to (20, 28) in pixels.
+	op.Uniforms = map[string]any{
+		"Model": []float32{
+			16, 0, 0, 0,
+			0, 16, 0, 0,
+			0, 0, 1, 0,
+			24, 40, 0, 2,
+		},
+	}
+
+	// The vertex positions are in model space, so the bounds of dst must not move them.
+	// With bounds from (8, 8), the square covers (12, 20) to (28, 36) in the coordinates of dst.
+	for _, o := range []image.Point{{0, 0}, {8, 8}} {
+		dst := ebiten.NewImageWithOptions(image.Rect(o.X, o.Y, o.X+w, o.Y+h), nil)
+		dst.DrawTrianglesShader32(vs, []uint32{0, 1, 2, 3, 4, 5}, s, op)
+
+		for j := range h {
+			for i := range w {
+				got := dst.At(o.X+i, o.Y+j).(color.RGBA)
+				var want color.RGBA
+				if 4 <= i && i < 20 && 12 <= j && j < 28 {
+					want = color.RGBA{R: 0xff, A: 0xff}
+				}
+				if got != want {
+					t.Errorf("origin %v: dst.At(%d, %d): got: %v, want: %v", o, o.X+i, o.Y+j, got, want)
+				}
+			}
+		}
+	}
+}

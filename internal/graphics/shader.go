@@ -17,8 +17,12 @@ package graphics
 import (
 	"bytes"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"regexp"
+	"slices"
 
 	"github.com/hajimehoshi/ebiten/v2/internal/shader"
 	"github.com/hajimehoshi/ebiten/v2/internal/shaderir"
@@ -49,11 +53,28 @@ func ParseKageUnitDirective(src []byte) (string, error) {
 	return value, nil
 }
 
+// hasVertexFunc reports whether src declares a top-level function Vertex.
+func hasVertexFunc(src []byte) bool {
+	f, err := parser.ParseFile(token.NewFileSet(), "", src, parser.SkipObjectResolution)
+	if err != nil {
+		// The compiler reports the error.
+		return false
+	}
+	for _, d := range f.Decls {
+		if fd, ok := d.(*ast.FuncDecl); ok && fd.Recv == nil && fd.Name.Name == "Vertex" {
+			return true
+		}
+	}
+	return false
+}
+
 // writeShaderBridge writes to w the Kage source appended to a user's fragment shader, bridging the user's
 // builtin functions to the engine's __-prefixed uniforms and textures. The bridge operates in the pixel
 // unit: the region uniforms hold pixels, and __texelAt fetches a texel by its integer pixel coordinates.
 // The bridge is an internal region, where the __-prefixed uniform variables can be declared.
-func writeShaderBridge(w io.Writer) error {
+//
+// If userVertex is true, the bridge omits the builtin vertex entry point __vertex and adds imageDstProjection.
+func writeShaderBridge(w io.Writer, userVertex bool) error {
 	if _, err := io.WriteString(w, "\n"+shader.InternalRegionBegin+"\n"); err != nil {
 		return err
 	}
@@ -190,14 +211,28 @@ func imageSrc%[1]dAt%[3]s(pos vec2) vec4 {
 		}
 	}
 
-	if _, err := io.WriteString(w, `
+	if userVertex {
+		if _, err := io.WriteString(w, `
+var __projectionMatrix mat4
+
+// imageDstProjection returns the matrix that maps a position on the destination texture in pixels
+// to the normalized device coordinates.
+func imageDstProjection() mat4 {
+	return __projectionMatrix
+}
+`); err != nil {
+			return err
+		}
+	} else {
+		if _, err := io.WriteString(w, `
 var __projectionMatrix mat4
 
 func __vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4) (vec4, vec2, vec4, vec4) {
 	return __projectionMatrix * vec4(dstPos, 0, 1), srcPos, color, custom
 }
 `); err != nil {
-		return err
+			return err
+		}
 	}
 
 	if _, err := io.WriteString(w, shader.InternalRegionEnd+"\n"); err != nil {
@@ -208,17 +243,29 @@ func __vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4) (vec4, vec2, ve
 }
 
 // completeShaderSource returns a complete shader source: the fragment shader source followed by the bridge.
-func completeShaderSource(fragmentSrc []byte) []byte {
+func completeShaderSource(fragmentSrc []byte, userVertex bool) []byte {
 	var buf bytes.Buffer
 	// Writing to a bytes.Buffer never fails.
 	_, _ = buf.Write(fragmentSrc)
-	_ = writeShaderBridge(&buf)
+	_ = writeShaderBridge(&buf, userVertex)
 	return buf.Bytes()
 }
 
 // CompileShader compiles a pixel-unit fragment shader source into an intermediate representation.
 // The source must select the pixel unit with the `//kage:unit pixels` directive.
 // The returned program's FragmentSource holds the given source.
+//
+// The source may declare its own vertex entry point, which replaces the builtin one:
+//
+//	func Vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4) (vec4, vec2, vec4, vec4)
+//
+// The in-params are the four attributes of each vertex, as they are given to the draw call:
+// the destination position, the source position, the color, and the custom values.
+// The atlas does not add the image origins to the positions, so the function adds imageDstOrigin()
+// and imageSrc0Origin() itself when it needs them.
+// The first returning value is the clip-space position, for example imageDstProjection() * vec4(pos, 0, 1)
+// for a position pos on the destination texture in pixels.
+// Fragment receives the fragment's position as before, then the other three returning values in order.
 func CompileShader(fragmentSrc []byte) (*shaderir.Program, error) {
 	value, err := ParseKageUnitDirective(fragmentSrc)
 	if err != nil {
@@ -228,11 +275,13 @@ func CompileShader(fragmentSrc []byte) (*shaderir.Program, error) {
 		return nil, fmt.Errorf("graphics: the `//kage:unit pixels` directive is required")
 	}
 
-	const (
-		vert = "__vertex"
-		frag = "Fragment"
-	)
-	ir, err := shader.Compile(completeShaderSource(fragmentSrc), vert, frag, ShaderSrcImageCount)
+	userVertex := hasVertexFunc(fragmentSrc)
+	vert := "__vertex"
+	if userVertex {
+		vert = "Vertex"
+	}
+	const frag = "Fragment"
+	ir, err := shader.Compile(completeShaderSource(fragmentSrc, userVertex), vert, frag, ShaderSrcImageCount)
 	if err != nil {
 		return nil, err
 	}
@@ -244,12 +293,23 @@ func CompileShader(fragmentSrc []byte) (*shaderir.Program, error) {
 		return nil, fmt.Errorf("graphics: fragment shader entry point '%s' is missing", frag)
 	}
 
+	if userVertex {
+		if !slices.EqualFunc(ir.Attributes, vertexAttributeTypes, func(a, b shaderir.Type) bool { return a.Equal(&b) }) ||
+			!slices.EqualFunc(ir.Varyings, vertexAttributeTypes[1:], func(a, b shaderir.Type) bool { return a.Equal(&b) }) {
+			return nil, fmt.Errorf("graphics: vertex shader entry point '%s' must be func(vec2, vec2, vec4, vec4) (vec4, vec2, vec4, vec4)", vert)
+		}
+		ir.UserVertex = true
+	}
+
 	ir.FragmentSource = bytes.Clone(fragmentSrc)
 
 	return ir, nil
 }
 
+// vertexAttributeTypes are the types of the vertex attributes that every graphics driver binds.
+var vertexAttributeTypes = []shaderir.Type{{Main: shaderir.Vec2}, {Main: shaderir.Vec2}, {Main: shaderir.Vec4}, {Main: shaderir.Vec4}}
+
 // CalcSourceID returns the source ID of a pixel-unit fragment shader source.
 func CalcSourceID(fragmentSrc []byte) shaderir.SourceID {
-	return shaderir.CalcSourceID(completeShaderSource(fragmentSrc))
+	return shaderir.CalcSourceID(completeShaderSource(fragmentSrc, hasVertexFunc(fragmentSrc)))
 }

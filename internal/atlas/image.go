@@ -465,8 +465,11 @@ func (i *Image) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 
 	dx, dy := float32(r.Min.X), float32(r.Min.Y)
 
+	// A shader with its own vertex function adds the origins itself, as its attributes might not be positions.
 	var oxf, oyf float32
-	if srcs[0] != nil {
+	if shader.ir.UserVertex {
+		// Keep the vertices as they are.
+	} else if srcs[0] != nil {
 		r := srcs[0].regionWithPadding()
 		oxf, oyf = float32(r.Min.X), float32(r.Min.Y)
 		// Adding zero offsets changes no position, so skip the loop.

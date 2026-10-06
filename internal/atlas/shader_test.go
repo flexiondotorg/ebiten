@@ -243,3 +243,60 @@ func TestBuiltinShaderSourceIDs(t *testing.T) {
 		})
 	}
 }
+
+func TestShaderUserVertexOnAtlas(t *testing.T) {
+	const w, h = 16, 16
+
+	// Put dst next to another image on the same backend, so that dst's origin is not (0, 0).
+	other := atlas.NewImage(w, h, atlas.ImageTypeRegular)
+	defer other.Deallocate()
+	other.WritePixels(make([]byte, 4*w*h), image.Rect(0, 0, w, h))
+	dst := atlas.NewImage(w, h, atlas.ImageTypeRegular)
+	defer dst.Deallocate()
+	dst.WritePixels(make([]byte, 4*w*h), image.Rect(0, 0, w, h))
+
+	ir, err := graphics.CompileShader([]byte(`//kage:unit pixels
+
+package main
+
+func Vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4) (vec4, vec2, vec4, vec4) {
+	return imageDstProjection() * vec4(dstPos+imageDstOrigin(), 0, 1), srcPos, color, custom
+}
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+	return vec4(1, 0, 0, 1)
+}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := atlas.NewShader(ir, "")
+
+	// Fill the left half.
+	vs := quadVertices(w/2, h, 0, 0, 1)
+	is := graphics.QuadIndices()
+	dr := image.Rect(0, 0, w, h)
+	dst.DrawTriangles([graphics.ShaderSrcImageCount]*atlas.Image{}, vs, is, graphicsdriver.BlendCopy, dr, [graphics.ShaderSrcImageCount]image.Rectangle{}, s, nil)
+
+	pix := make([]byte, 4*w*h)
+	ok, err := dst.ReadPixels(ui.Get().GraphicsDriverForTesting(), pix, image.Rect(0, 0, w, h))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("ReadPixels failed")
+	}
+	for j := range h {
+		for i := range w {
+			idx := 4 * (j*w + i)
+			got := color.RGBA{R: pix[idx], G: pix[idx+1], B: pix[idx+2], A: pix[idx+3]}
+			var want color.RGBA
+			if i < w/2 {
+				want = color.RGBA{R: 0xff, A: 0xff}
+			}
+			if got != want {
+				t.Errorf("at(%d, %d): got: %v, want: %v", i, j, got, want)
+			}
+		}
+	}
+}

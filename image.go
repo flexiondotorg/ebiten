@@ -944,7 +944,8 @@ func (i *Image) DrawTrianglesShader32(vertices []Vertex, indices []uint32, shade
 		sox, soy = src.originF32()
 	}
 	// Subtracting a zero origin changes no value, so skip it.
-	if dox != 0 || doy != 0 || sox != 0 || soy != 0 {
+	// A shader with its own vertex function gets its attributes as they are.
+	if !shader.userVertex && (dox != 0 || doy != 0 || sox != 0 || soy != 0) {
 		for i := 0; i < len(vs); i += graphics.VertexFloatCount {
 			// Create a temporary slice to reduce boundary checks.
 			vs := vs[i : i+4]
