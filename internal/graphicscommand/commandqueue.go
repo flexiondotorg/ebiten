@@ -506,20 +506,43 @@ func prependPreservedUniforms(uniforms []uint32, shader *Shader, dst *Image, src
 // Confirm the concrete value of graphics.PreservedUniformDwordCount.
 var _ [0]struct{} = [graphics.PreservedUniformDwordCount - 46]struct{}{}
 
+// commandQueueCount is the number of command queues in use at once in a frame without intermediate flushes:
+// one that the render thread flushes, one that waits to be sent to the render thread, as CallAsync blocks
+// while the render thread is busy, and the current one.
+const commandQueueCount = 3
+
 type commandQueuePool struct {
 	cache []*commandQueue
+	made  bool
 	m     sync.Mutex
 }
 
+// get returns the queue that was put back first.
+//
+// The pool makes commandQueueCount queues at the first call and hands them out in turn, so that every queue
+// grows its buffers in the first frames. Otherwise a queue that is needed only when the render thread falls
+// behind, which happens at a random time with vsync off, would be made and would grow its buffers in the
+// middle of a run. A frame with intermediate flushes keeps its queues in queuesInUse, so the pool still makes
+// a new queue when it runs out.
 func (c *commandQueuePool) get() *commandQueue {
 	c.m.Lock()
 	defer c.m.Unlock()
+
+	if !c.made {
+		c.made = true
+		c.cache = make([]*commandQueue, 0, commandQueueCount)
+		for range commandQueueCount - 1 {
+			c.cache = append(c.cache, &commandQueue{})
+		}
+		return &commandQueue{}
+	}
 
 	if len(c.cache) == 0 {
 		return &commandQueue{}
 	}
 
-	q := c.cache[len(c.cache)-1]
+	q := c.cache[0]
+	copy(c.cache, c.cache[1:])
 	c.cache[len(c.cache)-1] = nil
 	c.cache = c.cache[:len(c.cache)-1]
 	return q
