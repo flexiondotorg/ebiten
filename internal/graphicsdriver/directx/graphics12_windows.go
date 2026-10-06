@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"slices"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -77,6 +78,11 @@ type graphics12 struct {
 
 	vertices [frameCount][]*resourceWithSize
 	indices  [frameCount][]*resourceWithSize
+
+	// The members below are for the mesh draws. They are untested.
+	// instances holds one upload buffer for each DrawMesh call of a frame.
+	meshes    map[graphicsdriver.MeshID]*mesh12
+	instances [frameCount][]*resourceWithSize
 
 	graphicsInfra *graphicsInfra
 
@@ -972,6 +978,14 @@ func (g *graphics12) resetVerticesAndIndices(frameIndex int, release bool) {
 		}
 	}
 	g.indices[frameIndex] = g.indices[frameIndex][:0]
+
+	if release {
+		for i := range g.instances[frameIndex] {
+			g.instances[frameIndex][i].release()
+			g.instances[frameIndex][i] = nil
+		}
+	}
+	g.instances[frameIndex] = g.instances[frameIndex][:0]
 }
 
 // flushCommandList executes commands in the command list and waits for its completion.
@@ -1276,6 +1290,7 @@ func (g *graphics12) NewShader(program *shaderir.Program) (graphicsdriver.Shader
 		uniformOffsets: hlsl.UniformVariableOffsetsInDwords(program),
 		vertexShader:   vsh,
 		pixelShader:    psh,
+		mesh:           isMeshProgram(program),
 	}
 	g.addShader(s)
 	return s, nil
@@ -1286,61 +1301,14 @@ func (g *graphics12) DrawTriangles(dstID graphicsdriver.ImageID, srcs [graphics.
 		return fmt.Errorf("directx: shader ID is invalid")
 	}
 
-	if err := g.flushCommandList(g.copyCommandList); err != nil {
-		return err
-	}
-
-	// Release constant buffers when too many ones will be created.
-	numPipelines := 1
-	if len(g.pipelineStates.constantBuffers[g.frameIndex])+numPipelines > numDescriptorsPerFrame {
-		if err := g.flushCommandList(g.drawCommandList); err != nil {
-			return err
-		}
-		g.pipelineStates.releaseConstantBuffers(g.frameIndex)
-	}
-
-	dst := g.images[dstID]
-	var resourceBarriers []_D3D12_RESOURCE_BARRIER_Transition
-	if rb, ok := dst.transiteState(_D3D12_RESOURCE_STATE_RENDER_TARGET); ok {
-		resourceBarriers = append(resourceBarriers, rb)
-	}
-
-	var srcImages [graphics.ShaderSrcImageCount]*image12
-	for i, srcID := range srcs {
-		src := g.images[srcID]
-		if src == nil {
-			continue
-		}
-		srcImages[i] = src
-		if rb, ok := src.transiteState(_D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE); ok {
-			resourceBarriers = append(resourceBarriers, rb)
-		}
-	}
-
-	if len(resourceBarriers) > 0 {
-		g.drawCommandList.ResourceBarrier(resourceBarriers)
-	}
-
-	if err := dst.setAsRenderTarget(g.drawCommandList, g.device); err != nil {
+	dst, srcImages, err := g.beginDraw(dstID, srcs)
+	if err != nil {
 		return err
 	}
 
 	shader := g.shaders[shaderID]
 	g.tmpUniforms = appendAdjustedUniforms(g.tmpUniforms[:0], shader.uniformTypes, shader.uniformOffsets, uniforms)
 
-	w, h := dst.internalSize()
-	g.needFlushDrawCommandList = true
-	g.drawCommandList.RSSetViewports([]_D3D12_VIEWPORT{
-		{
-			TopLeftX: 0,
-			TopLeftY: 0,
-			Width:    float32(w),
-			Height:   float32(h),
-			MinDepth: _D3D12_MIN_DEPTH,
-			MaxDepth: _D3D12_MAX_DEPTH,
-		},
-	})
-	g.drawCommandList.IASetPrimitiveTopology(_D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST)
 	g.drawCommandList.IASetVertexBuffers(0, []_D3D12_VERTEX_BUFFER_VIEW{
 		{
 			BufferLocation: g.vertices[g.frameIndex][len(g.vertices[g.frameIndex])-1].value.GetGPUVirtualAddress(),
@@ -1358,6 +1326,205 @@ func (g *graphics12) DrawTriangles(dstID graphicsdriver.ImageID, srcs [graphics.
 		return err
 	}
 
+	return nil
+}
+
+// beginDraw moves dst and the source images to their states, and sets dst as the render target, the
+// viewport, and the topology for a draw.
+func (g *graphics12) beginDraw(dstID graphicsdriver.ImageID, srcs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID) (*image12, [graphics.ShaderSrcImageCount]*image12, error) {
+	var srcImages [graphics.ShaderSrcImageCount]*image12
+
+	if err := g.flushCommandList(g.copyCommandList); err != nil {
+		return nil, srcImages, err
+	}
+
+	// Release constant buffers when too many ones will be created.
+	numPipelines := 1
+	if len(g.pipelineStates.constantBuffers[g.frameIndex])+numPipelines > numDescriptorsPerFrame {
+		if err := g.flushCommandList(g.drawCommandList); err != nil {
+			return nil, srcImages, err
+		}
+		g.pipelineStates.releaseConstantBuffers(g.frameIndex)
+	}
+
+	dst := g.images[dstID]
+	var resourceBarriers []_D3D12_RESOURCE_BARRIER_Transition
+	if rb, ok := dst.transiteState(_D3D12_RESOURCE_STATE_RENDER_TARGET); ok {
+		resourceBarriers = append(resourceBarriers, rb)
+	}
+
+	for i, srcID := range srcs {
+		src := g.images[srcID]
+		if src == nil {
+			continue
+		}
+		srcImages[i] = src
+		if rb, ok := src.transiteState(_D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE); ok {
+			resourceBarriers = append(resourceBarriers, rb)
+		}
+	}
+
+	if len(resourceBarriers) > 0 {
+		g.drawCommandList.ResourceBarrier(resourceBarriers)
+	}
+
+	if err := dst.setAsRenderTarget(g.drawCommandList, g.device); err != nil {
+		return nil, srcImages, err
+	}
+
+	w, h := dst.internalSize()
+	g.needFlushDrawCommandList = true
+	g.drawCommandList.RSSetViewports([]_D3D12_VIEWPORT{
+		{
+			TopLeftX: 0,
+			TopLeftY: 0,
+			Width:    float32(w),
+			Height:   float32(h),
+			MinDepth: _D3D12_MIN_DEPTH,
+			MaxDepth: _D3D12_MAX_DEPTH,
+		},
+	})
+	g.drawCommandList.IASetPrimitiveTopology(_D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST)
+
+	return dst, srcImages, nil
+}
+
+// mesh12 is a mesh on the GPU. It is untested.
+type mesh12 struct {
+	vertices   resourceWithSize
+	indices    resourceWithSize
+	indexCount uint32
+}
+
+var _ graphicsdriver.MeshDrawer = (*graphics12)(nil)
+
+// CanDrawMesh is untested.
+func (g *graphics12) CanDrawMesh() bool {
+	return true
+}
+
+// DrawMesh is untested.
+func (g *graphics12) DrawMesh(dstID graphicsdriver.ImageID, srcs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, meshID graphicsdriver.MeshID, instances []float32, blend graphicsdriver.Blend, uniforms []uint32) error {
+	m := g.meshes[meshID]
+	if m == nil || len(instances) == 0 {
+		return nil
+	}
+
+	// Upload the instance records into a buffer of their own, as the GPU reads it after this call.
+	is := &g.instances[g.frameIndex]
+	idx := len(*is)
+	*is = slices.Grow(*is, 1)[:idx+1]
+	size := pow2(uint32(len(instances)) * uint32(unsafe.Sizeof(instances[0])))
+	if b := (*is)[idx]; b != nil && b.sizeInBytes < size {
+		b.release()
+		(*is)[idx] = nil
+	}
+	if (*is)[idx] == nil {
+		r, err := createBuffer(g.device, uint64(size), _D3D12_HEAP_TYPE_UPLOAD)
+		if err != nil {
+			*is = (*is)[:idx]
+			return err
+		}
+		(*is)[idx] = &resourceWithSize{value: r, sizeInBytes: size}
+	}
+	ib := (*is)[idx]
+	if err := uploadToBuffer(ib.value, unsafe.Slice((*byte)(unsafe.Pointer(&instances[0])), len(instances)*int(unsafe.Sizeof(instances[0])))); err != nil {
+		return err
+	}
+
+	dst, srcImages, err := g.beginDraw(dstID, srcs)
+	if err != nil {
+		return err
+	}
+
+	const stride = graphics.VertexFloatCount * uint32(unsafe.Sizeof(float32(0)))
+	g.drawCommandList.IASetVertexBuffers(0, []_D3D12_VERTEX_BUFFER_VIEW{
+		{
+			BufferLocation: m.vertices.value.GetGPUVirtualAddress(),
+			SizeInBytes:    m.vertices.sizeInBytes,
+			StrideInBytes:  stride,
+		},
+		{
+			BufferLocation: ib.value.GetGPUVirtualAddress(),
+			SizeInBytes:    ib.sizeInBytes,
+			StrideInBytes:  stride,
+		},
+	})
+	g.drawCommandList.IASetIndexBuffer(&_D3D12_INDEX_BUFFER_VIEW{
+		BufferLocation: m.indices.value.GetGPUVirtualAddress(),
+		SizeInBytes:    m.indices.sizeInBytes,
+		Format:         _DXGI_FORMAT_R32_UINT,
+	})
+
+	shader := g.shaders[shaderID]
+	g.tmpUniforms = appendAdjustedUniforms(g.tmpUniforms[:0], shader.uniformTypes, shader.uniformOffsets, uniforms)
+	if err := g.pipelineStates.bindShaderResources(g.device, g.drawCommandList, g.frameIndex, srcImages, g.tmpUniforms); err != nil {
+		return err
+	}
+	s, err := shader.pipelineState(blend, dst.screen)
+	if err != nil {
+		return err
+	}
+	g.drawCommandList.SetPipelineState(s)
+
+	g.drawCommandList.RSSetScissorRects([]_D3D12_RECT{
+		{
+			right:  int32(dst.width),
+			bottom: int32(dst.height),
+		},
+	})
+	g.drawCommandList.DrawIndexedInstanced(m.indexCount, uint32(len(instances)/graphics.VertexFloatCount), 0, 0, 0)
+
+	return nil
+}
+
+// NewMesh uploads the vertices and the indices under the ID. An empty mesh stays unknown, so it draws
+// nothing. The mesh stays in upload-heap buffers, which the GPU reads directly. It is untested.
+func (g *graphics12) NewMesh(id graphicsdriver.MeshID, vertices []float32, indices []uint32) error {
+	if len(vertices) == 0 || len(indices) == 0 {
+		return nil
+	}
+
+	vsize := uint32(len(vertices)) * uint32(unsafe.Sizeof(vertices[0]))
+	vs, err := createBuffer(g.device, uint64(vsize), _D3D12_HEAP_TYPE_UPLOAD)
+	if err != nil {
+		return err
+	}
+	isize := uint32(len(indices)) * uint32(unsafe.Sizeof(indices[0]))
+	is, err := createBuffer(g.device, uint64(isize), _D3D12_HEAP_TYPE_UPLOAD)
+	if err != nil {
+		vs.Release()
+		return err
+	}
+	err = uploadToBuffer(vs, unsafe.Slice((*byte)(unsafe.Pointer(&vertices[0])), vsize))
+	if err == nil {
+		err = uploadToBuffer(is, unsafe.Slice((*byte)(unsafe.Pointer(&indices[0])), isize))
+	}
+	if err != nil {
+		vs.Release()
+		is.Release()
+		return err
+	}
+
+	if g.meshes == nil {
+		g.meshes = map[graphicsdriver.MeshID]*mesh12{}
+	}
+	g.meshes[id] = &mesh12{
+		vertices:   resourceWithSize{value: vs, sizeInBytes: vsize},
+		indices:    resourceWithSize{value: is, sizeInBytes: isize},
+		indexCount: uint32(len(indices)),
+	}
+	return nil
+}
+
+// uploadToBuffer copies data into the upload-heap buffer r. It is untested.
+func uploadToBuffer(r *_ID3D12Resource, data []byte) error {
+	m, err := r.Map(0, &_D3D12_RANGE{Begin: 0, End: 0})
+	if err != nil {
+		return err
+	}
+	copy(unsafe.Slice((*byte)(unsafe.Pointer(m)), len(data)), data)
+	r.Unmap(0, nil)
 	return nil
 }
 

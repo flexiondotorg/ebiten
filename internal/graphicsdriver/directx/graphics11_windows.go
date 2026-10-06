@@ -16,6 +16,7 @@ package directx
 
 import (
 	"fmt"
+	"slices"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -76,6 +77,20 @@ func init() {
 			InputSlotClass:       _D3D11_INPUT_PER_VERTEX_DATA,
 			InstanceDataStepRate: 0,
 		})
+	}
+}
+
+// inputElementDescsForMeshDX11 is the input layout of a shader that draws a mesh: the vertex attributes,
+// then the same four elements again in input slot 1, for each instance. It is untested.
+var inputElementDescsForMeshDX11 []_D3D11_INPUT_ELEMENT_DESC
+
+func init() {
+	inputElementDescsForMeshDX11 = slices.Clone(inputElementDescsForDX11)
+	for i, s := range meshInstanceSemantics {
+		e := inputElementDescsForDX11[i]
+		e.SemanticName, e.SemanticIndex = s.name, s.index
+		e.InputSlot, e.InputSlotClass, e.InstanceDataStepRate = 1, _D3D11_INPUT_PER_INSTANCE_DATA, 1
+		inputElementDescsForMeshDX11 = append(inputElementDescsForMeshDX11, e)
 	}
 }
 
@@ -165,6 +180,11 @@ type graphics11 struct {
 
 	rasterizerState *_ID3D11RasterizerState
 	blendStates     map[blendStateKey]*_ID3D11BlendState
+
+	// The members below are for the mesh draws. They are untested.
+	meshes                    map[graphicsdriver.MeshID]*mesh11
+	instanceBuffer            *_ID3D11Buffer
+	instanceBufferSizeInBytes uint32
 
 	vsyncEnabled bool
 	window       windows.HWND
@@ -512,6 +532,7 @@ func (g *graphics11) NewShader(program *shaderir.Program) (graphicsdriver.Shader
 		uniformOffsets:   hlsl.UniformVariableOffsetsInDwords(program),
 		vertexShaderBlob: vsh,
 		pixelShaderBlob:  psh,
+		mesh:             isMeshProgram(program),
 	}
 	g.addShader(s)
 	return s, nil
@@ -533,6 +554,28 @@ func (g *graphics11) removeShader(s *shader11) {
 }
 
 func (g *graphics11) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, dstRegions []graphicsdriver.DstRegion, indexOffset int, blend graphicsdriver.Blend, uniforms []uint32) error {
+	if _, err := g.beginDraw(dstID, srcIDs, shaderID, blend, uniforms); err != nil {
+		return err
+	}
+
+	for _, dstRegion := range dstRegions {
+		g.deviceContext.RSSetScissorRects([]_D3D11_RECT{
+			{
+				left:   int32(dstRegion.Region.Min.X),
+				top:    int32(dstRegion.Region.Min.Y),
+				right:  int32(dstRegion.Region.Max.X),
+				bottom: int32(dstRegion.Region.Max.Y),
+			},
+		})
+		g.deviceContext.DrawIndexed(uint32(dstRegion.IndexCount), uint32(indexOffset), 0)
+		indexOffset += dstRegion.IndexCount
+	}
+
+	return nil
+}
+
+// beginDraw sets the render target, the shader, and the blend state for a draw into dst, and returns dst.
+func (g *graphics11) beginDraw(dstID graphicsdriver.ImageID, srcIDs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, blend graphicsdriver.Blend, uniforms []uint32) (*image11, error) {
 	// Remove bound textures first. This is needed to avoid warnings on the debugger.
 	g.deviceContext.OMSetRenderTargets([]*_ID3D11RenderTargetView{nil})
 	var srvs [graphics.ShaderSrcImageCount]*_ID3D11ShaderResourceView
@@ -561,34 +604,126 @@ func (g *graphics11) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphic
 	})
 
 	if err := dst.setAsRenderTarget(); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Set the shader parameters.
 	shader := g.shaders[shaderID]
 	if err := shader.use(uniforms, srcs); err != nil {
-		return err
+		return nil, err
 	}
 
 	bs, err := g.blendState(blend)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	g.deviceContext.OMSetBlendState(bs, nil, 0xffffffff)
 
-	for _, dstRegion := range dstRegions {
-		g.deviceContext.RSSetScissorRects([]_D3D11_RECT{
-			{
-				left:   int32(dstRegion.Region.Min.X),
-				top:    int32(dstRegion.Region.Min.Y),
-				right:  int32(dstRegion.Region.Max.X),
-				bottom: int32(dstRegion.Region.Max.Y),
-			},
-		})
-		g.deviceContext.DrawIndexed(uint32(dstRegion.IndexCount), uint32(indexOffset), 0)
-		indexOffset += dstRegion.IndexCount
+	return dst, nil
+}
+
+// mesh11 is a mesh on the GPU. It is untested.
+type mesh11 struct {
+	vertexBuffer *_ID3D11Buffer
+	indexBuffer  *_ID3D11Buffer
+	indexCount   uint32
+}
+
+var _ graphicsdriver.MeshDrawer = (*graphics11)(nil)
+
+// CanDrawMesh is untested.
+func (g *graphics11) CanDrawMesh() bool {
+	return true
+}
+
+// DrawMesh is untested.
+func (g *graphics11) DrawMesh(dstID graphicsdriver.ImageID, srcIDs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, meshID graphicsdriver.MeshID, instances []float32, blend graphicsdriver.Blend, uniforms []uint32) error {
+	m := g.meshes[meshID]
+	if m == nil || len(instances) == 0 {
+		return nil
 	}
 
+	if size := pow2(uint32(len(instances)) * uint32(unsafe.Sizeof(instances[0]))); g.instanceBufferSizeInBytes < size {
+		if g.instanceBuffer != nil {
+			g.instanceBuffer.Release()
+			g.instanceBuffer = nil
+			g.instanceBufferSizeInBytes = 0
+		}
+		b, err := g.device.CreateBuffer(&_D3D11_BUFFER_DESC{
+			ByteWidth:      size,
+			Usage:          _D3D11_USAGE_DYNAMIC,
+			BindFlags:      uint32(_D3D11_BIND_VERTEX_BUFFER),
+			CPUAccessFlags: uint32(_D3D11_CPU_ACCESS_WRITE),
+		}, nil)
+		if err != nil {
+			return err
+		}
+		g.instanceBuffer = b
+		g.instanceBufferSizeInBytes = size
+	}
+	var mapped _D3D11_MAPPED_SUBRESOURCE
+	if err := g.deviceContext.Map(unsafe.Pointer(g.instanceBuffer), 0, _D3D11_MAP_WRITE_DISCARD, 0, &mapped); err != nil {
+		return err
+	}
+	copy(unsafe.Slice((*float32)(mapped.pData), len(instances)), instances)
+	g.deviceContext.Unmap(unsafe.Pointer(g.instanceBuffer), 0)
+
+	dst, err := g.beginDraw(dstID, srcIDs, shaderID, blend, uniforms)
+	if err != nil {
+		return err
+	}
+
+	g.deviceContext.RSSetScissorRects([]_D3D11_RECT{
+		{
+			right:  int32(dst.width),
+			bottom: int32(dst.height),
+		},
+	})
+
+	const stride = graphics.VertexFloatCount * uint32(unsafe.Sizeof(float32(0)))
+	g.deviceContext.IASetVertexBuffers(0, []*_ID3D11Buffer{m.vertexBuffer, g.instanceBuffer}, []uint32{stride, stride}, []uint32{0, 0})
+	g.deviceContext.IASetIndexBuffer(m.indexBuffer, _DXGI_FORMAT_R32_UINT, 0)
+	g.deviceContext.DrawIndexedInstanced(m.indexCount, uint32(len(instances)/graphics.VertexFloatCount), 0, 0, 0)
+
+	// SetVertices binds its buffers only when it makes them, so bind them again for DrawTriangles.
+	g.deviceContext.IASetVertexBuffers(0, []*_ID3D11Buffer{g.vertexBuffer}, []uint32{stride}, []uint32{0})
+	g.deviceContext.IASetIndexBuffer(g.indexBuffer, _DXGI_FORMAT_R32_UINT, 0)
+
+	return nil
+}
+
+// NewMesh uploads the vertices and the indices under the ID. An empty mesh stays unknown, so it draws
+// nothing. It is untested.
+func (g *graphics11) NewMesh(id graphicsdriver.MeshID, vertices []float32, indices []uint32) error {
+	if len(vertices) == 0 || len(indices) == 0 {
+		return nil
+	}
+
+	newBuffer := func(data unsafe.Pointer, size int, bindFlag _D3D11_BIND_FLAG) (*_ID3D11Buffer, error) {
+		return g.device.CreateBuffer(&_D3D11_BUFFER_DESC{
+			ByteWidth: uint32(size),
+			Usage:     _D3D11_USAGE_IMMUTABLE,
+			BindFlags: uint32(bindFlag),
+		}, &_D3D11_SUBRESOURCE_DATA{pSysMem: data})
+	}
+	vb, err := newBuffer(unsafe.Pointer(&vertices[0]), len(vertices)*int(unsafe.Sizeof(vertices[0])), _D3D11_BIND_VERTEX_BUFFER)
+	if err != nil {
+		return err
+	}
+	ib, err := newBuffer(unsafe.Pointer(&indices[0]), len(indices)*int(unsafe.Sizeof(indices[0])), _D3D11_BIND_INDEX_BUFFER)
+	if err != nil {
+		vb.Release()
+		return err
+	}
+
+	if g.meshes == nil {
+		g.meshes = map[graphicsdriver.MeshID]*mesh11{}
+	}
+	g.meshes[id] = &mesh11{
+		vertexBuffer: vb,
+		indexBuffer:  ib,
+		indexCount:   uint32(len(indices)),
+	}
 	return nil
 }
 

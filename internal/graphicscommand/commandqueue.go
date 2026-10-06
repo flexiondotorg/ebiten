@@ -112,6 +112,10 @@ type commandQueue struct {
 
 	tmpNumVertexFloats int
 
+	// instances holds the instance records of the mesh draws apart from vertices, so that the vertex
+	// offsets of the draw-triangles commands stay the same.
+	instances []float32
+
 	uint32sBuffer uint32sBuffer
 	finalizers    []func()
 }
@@ -199,6 +203,25 @@ func (q *commandQueue) EnqueueDrawTrianglesCommand(dst *Image, srcs [graphics.Sh
 		case debug.CallerTypeInternal:
 			c.firstCaller = fmt.Sprintf("%s:%d (internal)", file, line)
 		}
+	}
+	q.commands = append(q.commands, c)
+}
+
+// EnqueueDrawMeshCommand enqueues a command to draw a mesh once for each instance record.
+func (q *commandQueue) EnqueueDrawMeshCommand(dst *Image, srcs [graphics.ShaderSrcImageCount]*Image, mesh *Mesh, instances []float32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32) {
+	q.instances = append(q.instances, instances...)
+	uniforms = q.prependPreservedUniforms(uniforms, shader, dst, srcs, dstRegion, srcRegions)
+	shader.ir.FilterUniformVariables(uniforms)
+
+	c := theDrawMeshCommandPool.Get().(*drawMeshCommand)
+	*c = drawMeshCommand{
+		dst:       dst,
+		srcs:      srcs,
+		mesh:      mesh,
+		instances: q.instances[len(q.instances)-len(instances):],
+		blend:     blend,
+		shader:    shader,
+		uniforms:  uniforms,
 	}
 	q.commands = append(q.commands, c)
 }
@@ -314,10 +337,15 @@ func (q *commandQueue) flush(graphicsDriver graphicsdriver.Graphics, mode graphi
 				}
 				theDrawTrianglesCommandPool.Put(c)
 			}
+			if c, ok := c.(*drawMeshCommand); ok {
+				*c = drawMeshCommand{}
+				theDrawMeshCommandPool.Put(c)
+			}
 			q.commands[i] = nil
 		}
 		q.commands = q.commands[:0]
 		q.vertices = q.vertices[:0]
+		q.instances = q.instances[:0]
 		q.indices = q.indices[:0]
 		q.tmpNumVertexFloats = 0
 
@@ -627,6 +655,13 @@ func (c *commandQueueManager) enqueueDrawTrianglesCommand(dst *Image, srcs [grap
 		c.current = c.pool.get()
 	}
 	c.current.EnqueueDrawTrianglesCommand(dst, srcs, vertices, indices, blend, dstRegion, srcRegions, shader, uniforms)
+}
+
+func (c *commandQueueManager) enqueueDrawMeshCommand(dst *Image, srcs [graphics.ShaderSrcImageCount]*Image, mesh *Mesh, instances []float32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32) {
+	if c.current == nil {
+		c.current = c.pool.get()
+	}
+	c.current.EnqueueDrawMeshCommand(dst, srcs, mesh, instances, blend, dstRegion, srcRegions, shader, uniforms)
 }
 
 func (c *commandQueueManager) flush(graphicsDriver graphicsdriver.Graphics, mode graphicsdriver.FlushMode) error {

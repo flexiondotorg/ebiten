@@ -155,6 +155,64 @@ func (c *drawTrianglesCommand) NeedsSync() bool {
 	return false
 }
 
+var theDrawMeshCommandPool = sync.Pool{
+	New: func() any {
+		return &drawMeshCommand{}
+	},
+}
+
+// drawMeshCommand draws a mesh once for each instance record.
+//
+// A drawMeshCommand never merges with another command.
+type drawMeshCommand struct {
+	dst       *Image
+	srcs      [graphics.ShaderSrcImageCount]*Image
+	mesh      *Mesh
+	instances []float32
+	blend     graphicsdriver.Blend
+	shader    *Shader
+	uniforms  []uint32
+}
+
+func (c *drawMeshCommand) String() string {
+	return fmt.Sprintf("draw-mesh: dst: %d, mesh: %d, num of instances: %d, shader: %d", c.dst.id, c.mesh.id, len(c.instances)/graphics.VertexFloatCount, c.shader.id)
+}
+
+func (c *drawMeshCommand) Exec(commandQueue *commandQueue, graphicsDriver graphicsdriver.Graphics, indexOffset int) error {
+	var imgs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID
+	for i, src := range c.srcs {
+		if src == nil {
+			imgs[i] = graphicsdriver.InvalidImageID
+			continue
+		}
+		imgs[i] = src.image.ID()
+	}
+	return graphicsDriver.(graphicsdriver.MeshDrawer).DrawMesh(c.dst.image.ID(), imgs, c.shader.shader.ID(), c.mesh.id, c.instances, c.blend, c.uniforms)
+}
+
+func (c *drawMeshCommand) NeedsSync() bool {
+	return false
+}
+
+// newMeshCommand uploads a mesh.
+type newMeshCommand struct {
+	mesh     *Mesh
+	vertices []float32
+	indices  []uint32
+}
+
+func (c *newMeshCommand) String() string {
+	return fmt.Sprintf("new-mesh: result: %d, num of vertices: %d, num of indices: %d", c.mesh.id, len(c.vertices)/graphics.VertexFloatCount, len(c.indices))
+}
+
+func (c *newMeshCommand) Exec(commandQueue *commandQueue, graphicsDriver graphicsdriver.Graphics, indexOffset int) error {
+	return graphicsDriver.(graphicsdriver.MeshDrawer).NewMesh(c.mesh.id, c.vertices, c.indices)
+}
+
+func (c *newMeshCommand) NeedsSync() bool {
+	return false
+}
+
 func (c *drawTrianglesCommand) numVertices() int {
 	return len(c.vertices)
 }

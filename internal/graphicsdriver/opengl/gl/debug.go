@@ -261,6 +261,14 @@ func (d *DebugContext) DrawElements(arg0 uint32, arg1 int32, arg2 uint32, arg3 i
 	}
 }
 
+func (d *DebugContext) DrawElementsInstanced(arg0 uint32, arg1 int32, arg2 uint32, arg3 int, arg4 int32) {
+	d.Context.DrawElementsInstanced(arg0, arg1, arg2, arg3, arg4)
+	fmt.Fprintln(os.Stderr, "DrawElementsInstanced")
+	if e := d.Context.GetError(); e != NO_ERROR {
+		panic(fmt.Sprintf("gl: GetError() returned %d at DrawElementsInstanced", e))
+	}
+}
+
 func (d *DebugContext) Enable(arg0 uint32) {
 	d.Context.Enable(arg0)
 	fmt.Fprintln(os.Stderr, "Enable")
@@ -384,6 +392,11 @@ func (d *DebugContext) GetUniformLocation(arg0 uint32, arg1 string) int32 {
 	if e := d.Context.GetError(); e != NO_ERROR {
 		panic(fmt.Sprintf("gl: GetError() returned %d at GetUniformLocation", e))
 	}
+	return out0
+}
+
+func (d *DebugContext) HasInstancing() bool {
+	out0 := d.Context.HasInstancing()
 	return out0
 }
 
@@ -576,6 +589,14 @@ func (d *DebugContext) UseProgram(arg0 uint32) {
 	fmt.Fprintln(os.Stderr, "UseProgram")
 	if e := d.Context.GetError(); e != NO_ERROR {
 		panic(fmt.Sprintf("gl: GetError() returned %d at UseProgram", e))
+	}
+}
+
+func (d *DebugContext) VertexAttribDivisor(arg0 uint32, arg1 uint32) {
+	d.Context.VertexAttribDivisor(arg0, arg1)
+	fmt.Fprintln(os.Stderr, "VertexAttribDivisor")
+	if e := d.Context.GetError(); e != NO_ERROR {
+		panic(fmt.Sprintf("gl: GetError() returned %d at VertexAttribDivisor", e))
 	}
 }
 

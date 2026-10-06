@@ -46,6 +46,7 @@ type defaultContext struct {
 	fnDeleteTexture           js.Value
 	fnDeleteVertexArray       js.Value
 	fnDrawElements            js.Value
+	fnDrawElementsInstanced   js.Value
 	fnEnable                  js.Value
 	fnEnableVertexAttribArray js.Value
 	fnFinish                  js.Value
@@ -83,6 +84,7 @@ type defaultContext struct {
 	fnUniformMatrix3fv        js.Value
 	fnUniformMatrix4fv        js.Value
 	fnUseProgram              js.Value
+	fnVertexAttribDivisor     js.Value
 	fnVertexAttribPointer     js.Value
 	fnViewport                js.Value
 
@@ -164,6 +166,7 @@ func NewDefaultContext(v js.Value) (Context, error) {
 		fnDeleteTexture:           v.Get("deleteTexture").Call("bind", v),
 		fnDeleteVertexArray:       v.Get("deleteVertexArray").Call("bind", v),
 		fnDrawElements:            v.Get("drawElements").Call("bind", v),
+		fnDrawElementsInstanced:   v.Get("drawElementsInstanced").Call("bind", v),
 		fnEnable:                  v.Get("enable").Call("bind", v),
 		fnEnableVertexAttribArray: v.Get("enableVertexAttribArray").Call("bind", v),
 		fnFinish:                  v.Get("finish").Call("bind", v),
@@ -201,6 +204,7 @@ func NewDefaultContext(v js.Value) (Context, error) {
 		fnUniformMatrix3fv:        v.Get("uniformMatrix3fv").Call("bind", v),
 		fnUniformMatrix4fv:        v.Get("uniformMatrix4fv").Call("bind", v),
 		fnUseProgram:              v.Get("useProgram").Call("bind", v),
+		fnVertexAttribDivisor:     v.Get("vertexAttribDivisor").Call("bind", v),
 		fnVertexAttribPointer:     v.Get("vertexAttribPointer").Call("bind", v),
 		fnViewport:                v.Get("viewport").Call("bind", v),
 	}
@@ -218,6 +222,11 @@ func (c *defaultContext) LoadFunctions() error {
 
 func (c *defaultContext) IsES() bool {
 	// WebGL is compatible with GLES.
+	return true
+}
+
+// HasInstancing reports true: WebGL 2 has instanced draws.
+func (c *defaultContext) HasInstancing() bool {
 	return true
 }
 
@@ -347,6 +356,10 @@ func (c *defaultContext) DeleteVertexArray(array uint32) {
 
 func (c *defaultContext) DrawElements(mode uint32, count int32, xtype uint32, offset int) {
 	c.fnDrawElements.Invoke(mode, count, xtype, offset)
+}
+
+func (c *defaultContext) DrawElementsInstanced(mode uint32, count int32, xtype uint32, offset int, instanceCount int32) {
+	c.fnDrawElementsInstanced.Invoke(mode, count, xtype, offset, instanceCount)
 }
 
 func (c *defaultContext) Enable(cap uint32) {
@@ -577,6 +590,10 @@ func (c *defaultContext) UniformMatrix4fv(location int32, value []float32) {
 
 func (c *defaultContext) UseProgram(program uint32) {
 	c.fnUseProgram.Invoke(c.programs.get(program))
+}
+
+func (c *defaultContext) VertexAttribDivisor(index uint32, divisor uint32) {
+	c.fnVertexAttribDivisor.Invoke(index, divisor)
 }
 
 func (c *defaultContext) VertexAttribPointer(index uint32, size int32, xtype uint32, normalized bool, stride int32, offset int) {

@@ -174,6 +174,13 @@ package gl
 //   ((fn)(fnptr))(mode, count, type, indices);
 // }
 //
+// #cgo noescape glowDrawElementsInstanced
+// #cgo nocallback glowDrawElementsInstanced
+// static void glowDrawElementsInstanced(uintptr_t fnptr, GLenum mode, GLsizei count, GLenum type, const uintptr_t indices, GLsizei instancecount) {
+//   typedef void (*fn)(GLenum mode, GLsizei count, GLenum type, const uintptr_t indices, GLsizei instancecount);
+//   ((fn)(fnptr))(mode, count, type, indices, instancecount);
+// }
+//
 // #cgo noescape glowEnable
 // #cgo nocallback glowEnable
 // static void glowEnable(uintptr_t fnptr, GLenum cap) {
@@ -440,6 +447,13 @@ package gl
 //   ((fn)(fnptr))(program);
 // }
 //
+// #cgo noescape glowVertexAttribDivisor
+// #cgo nocallback glowVertexAttribDivisor
+// static void glowVertexAttribDivisor(uintptr_t fnptr, GLuint index, GLuint divisor) {
+//   typedef void (*fn)(GLuint index, GLuint divisor);
+//   ((fn)(fnptr))(index, divisor);
+// }
+//
 // #cgo noescape glowVertexAttribPointer
 // #cgo nocallback glowVertexAttribPointer
 // static void glowVertexAttribPointer(uintptr_t fnptr, GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const uintptr_t pointer) {
@@ -483,6 +497,7 @@ type defaultContext struct {
 	gpDeleteTextures          C.uintptr_t
 	gpDeleteVertexArrays      C.uintptr_t
 	gpDrawElements            C.uintptr_t
+	gpDrawElementsInstanced   C.uintptr_t
 	gpEnable                  C.uintptr_t
 	gpEnableVertexAttribArray C.uintptr_t
 	gpFinish                  C.uintptr_t
@@ -521,10 +536,14 @@ type defaultContext struct {
 	gpUniformMatrix3fv        C.uintptr_t
 	gpUniformMatrix4fv        C.uintptr_t
 	gpUseProgram              C.uintptr_t
+	gpVertexAttribDivisor     C.uintptr_t
 	gpVertexAttribPointer     C.uintptr_t
 	gpViewport                C.uintptr_t
 
 	isES bool
+
+	// hasInstancing reports whether the optional functions of the instanced draws are loaded.
+	hasInstancing bool
 }
 
 func NewDefaultContext() (Context, error) {
@@ -666,6 +685,10 @@ func (c *defaultContext) DeleteVertexArray(array uint32) {
 
 func (c *defaultContext) DrawElements(mode uint32, count int32, xtype uint32, offset int) {
 	C.glowDrawElements(c.gpDrawElements, C.GLenum(mode), C.GLsizei(count), C.GLenum(xtype), C.uintptr_t(offset))
+}
+
+func (c *defaultContext) DrawElementsInstanced(mode uint32, count int32, xtype uint32, offset int, instanceCount int32) {
+	C.glowDrawElementsInstanced(c.gpDrawElementsInstanced, C.GLenum(mode), C.GLsizei(count), C.GLenum(xtype), C.uintptr_t(offset), C.GLsizei(instanceCount))
 }
 
 func (c *defaultContext) Enable(cap uint32) {
@@ -851,6 +874,10 @@ func (c *defaultContext) UseProgram(program uint32) {
 	C.glowUseProgram(c.gpUseProgram, C.GLuint(program))
 }
 
+func (c *defaultContext) VertexAttribDivisor(index uint32, divisor uint32) {
+	C.glowVertexAttribDivisor(c.gpVertexAttribDivisor, C.GLuint(index), C.GLuint(divisor))
+}
+
 func (c *defaultContext) VertexAttribPointer(index uint32, size int32, xtype uint32, normalized bool, stride int32, offset int) {
 	C.glowVertexAttribPointer(c.gpVertexAttribPointer, C.GLuint(index), C.GLint(size), C.GLenum(xtype), C.GLboolean(boolToInt(normalized)), C.GLsizei(stride), C.uintptr_t(offset))
 }
@@ -925,7 +952,17 @@ func (c *defaultContext) LoadFunctions() error {
 	c.gpVertexAttribPointer = C.uintptr_t(g.get("glVertexAttribPointer"))
 	c.gpViewport = C.uintptr_t(g.get("glViewport"))
 
+	// A missing function of the instanced draws must not fail the context.
+	gi := procAddressGetter{ctx: c}
+	c.gpDrawElementsInstanced = C.uintptr_t(gi.get("glDrawElementsInstanced"))
+	c.gpVertexAttribDivisor = C.uintptr_t(gi.get("glVertexAttribDivisor"))
+	c.hasInstancing = gi.error() == nil
+
 	return g.error()
+}
+
+func (c *defaultContext) HasInstancing() bool {
+	return c.hasInstancing
 }
 
 // HasTimerQuery reports false: this context does not load the query functions, and they do nothing.

@@ -221,24 +221,48 @@ func (g *Graphics) Reset() error {
 }
 
 func (g *Graphics) SetVertices(vertices []float32, indices []uint32) error {
+	g.endMeshDraws()
 	g.state.setVertices(&g.context, vertices, indices)
 	return nil
 }
 
 func (g *Graphics) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, dstRegions []graphicsdriver.DstRegion, indexOffset int, blend graphicsdriver.Blend, uniforms []uint32) error {
+	g.endMeshDraws()
+	destination, err := g.useDestinationAndProgram(dstID, srcIDs, shaderID, blend, uniforms)
+	if err != nil {
+		return err
+	}
+	if len(dstRegions) > 0 {
+		g.beginPass(destination)
+	}
+
+	for _, dstRegion := range dstRegions {
+		g.context.ctx.Scissor(
+			int32(dstRegion.Region.Min.X),
+			int32(dstRegion.Region.Min.Y),
+			int32(dstRegion.Region.Dx()),
+			int32(dstRegion.Region.Dy()),
+		)
+		g.context.ctx.DrawElements(gl.TRIANGLES, int32(dstRegion.IndexCount), gl.UNSIGNED_INT, indexOffset*int(unsafe.Sizeof(uint32(0))))
+		indexOffset += dstRegion.IndexCount
+	}
+
+	return nil
+}
+
+// useDestinationAndProgram binds the destination, the blend, the program, the uniforms, and the source textures of a draw.
+// DrawTriangles and DrawMesh share it.
+func (g *Graphics) useDestinationAndProgram(dstID graphicsdriver.ImageID, srcIDs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, blend graphicsdriver.Blend, uniforms []uint32) (*Image, error) {
 	if shaderID == graphicsdriver.InvalidShaderID {
-		return fmt.Errorf("opengl: shader ID is invalid")
+		return nil, fmt.Errorf("opengl: shader ID is invalid")
 	}
 
 	destination := g.images[dstID]
 
 	g.drawCalled = true
-	if len(dstRegions) > 0 {
-		g.beginPass(destination)
-	}
 
 	if err := destination.setViewport(); err != nil {
-		return err
+		return nil, err
 	}
 	g.context.blend(blend)
 
@@ -281,7 +305,7 @@ func (g *Graphics) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphics.
 	}
 
 	if err := g.useProgram(program, g.uniformVars, imgs); err != nil {
-		return err
+		return nil, err
 	}
 
 	for i := range g.uniformVars {
@@ -289,18 +313,7 @@ func (g *Graphics) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphics.
 	}
 	g.uniformVars = g.uniformVars[:0]
 
-	for _, dstRegion := range dstRegions {
-		g.context.ctx.Scissor(
-			int32(dstRegion.Region.Min.X),
-			int32(dstRegion.Region.Min.Y),
-			int32(dstRegion.Region.Dx()),
-			int32(dstRegion.Region.Dy()),
-		)
-		g.context.ctx.DrawElements(gl.TRIANGLES, int32(dstRegion.IndexCount), gl.UNSIGNED_INT, indexOffset*int(unsafe.Sizeof(uint32(0))))
-		indexOffset += dstRegion.IndexCount
-	}
-
-	return nil
+	return destination, nil
 }
 
 func (g *Graphics) SetVsyncEnabled(enabled bool) {

@@ -22,6 +22,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/internal/atlas"
 	"github.com/hajimehoshi/ebiten/v2/internal/buffered"
 	"github.com/hajimehoshi/ebiten/v2/internal/graphics"
+	"github.com/hajimehoshi/ebiten/v2/internal/graphicscommand"
 	"github.com/hajimehoshi/ebiten/v2/internal/graphicsdriver"
 )
 
@@ -75,6 +76,18 @@ func (m *Mipmap) markDirty() {
 
 func (m *Mipmap) ReadPixels(graphicsDriver graphicsdriver.Graphics, pixels []byte, region image.Rectangle) (ok bool, err error) {
 	return m.orig.ReadPixels(graphicsDriver, pixels, region)
+}
+
+// DrawMesh draws the mesh once for each instance record.
+func (m *Mipmap) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Mipmap, mesh *graphicscommand.Mesh, instances []float32, blend graphicsdriver.Blend, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *atlas.Shader, uniforms []uint32) {
+	var imgs [graphics.ShaderSrcImageCount]*buffered.Image
+	for i, src := range srcs {
+		if src != nil {
+			imgs[i] = src.orig
+		}
+	}
+	m.orig.DrawMesh(imgs, mesh, instances, blend, srcRegions, shader, uniforms)
+	m.markDirty()
 }
 
 func (m *Mipmap) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Mipmap, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *atlas.Shader, uniforms []uint32, canSkipMipmap bool) {

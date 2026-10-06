@@ -55,6 +55,7 @@ type defaultContext struct {
 	gpDeleteTextures          uintptr
 	gpDeleteVertexArrays      uintptr
 	gpDrawElements            uintptr
+	gpDrawElementsInstanced   uintptr
 	gpEnable                  uintptr
 	gpEnableVertexAttribArray uintptr
 	gpFinish                  uintptr
@@ -93,8 +94,12 @@ type defaultContext struct {
 	gpUniformMatrix3fv        uintptr
 	gpUniformMatrix4fv        uintptr
 	gpUseProgram              uintptr
+	gpVertexAttribDivisor     uintptr
 	gpVertexAttribPointer     uintptr
 	gpViewport                uintptr
+
+	// hasInstancing reports whether the optional functions of the instanced draws are loaded.
+	hasInstancing bool
 
 	// args holds the arguments of call.
 	args [15]uintptr
@@ -255,6 +260,10 @@ func (c *defaultContext) DeleteVertexArray(array uint32) {
 
 func (c *defaultContext) DrawElements(mode uint32, count int32, xtype uint32, offset int) {
 	c.call(c.gpDrawElements, uintptr(mode), uintptr(count), uintptr(xtype), uintptr(offset))
+}
+
+func (c *defaultContext) DrawElementsInstanced(mode uint32, count int32, xtype uint32, offset int, instanceCount int32) {
+	c.call(c.gpDrawElementsInstanced, uintptr(mode), uintptr(count), uintptr(xtype), uintptr(offset), uintptr(instanceCount))
 }
 
 func (c *defaultContext) Enable(cap uint32) {
@@ -452,6 +461,10 @@ func (c *defaultContext) UseProgram(program uint32) {
 	c.call(c.gpUseProgram, uintptr(program))
 }
 
+func (c *defaultContext) VertexAttribDivisor(index uint32, divisor uint32) {
+	c.call(c.gpVertexAttribDivisor, uintptr(index), uintptr(divisor))
+}
+
 func (c *defaultContext) VertexAttribPointer(index uint32, size int32, xtype uint32, normalized bool, stride int32, offset int) {
 	c.call(c.gpVertexAttribPointer, uintptr(index), uintptr(size), uintptr(xtype), uintptr(boolToInt(normalized)), uintptr(stride), uintptr(offset))
 }
@@ -540,7 +553,18 @@ func (c *defaultContext) LoadFunctions() error {
 	c.hasTimerQuery = gq.error() == nil && c.timerQuerySupported()
 	gs := procAddressGetter{ctx: c}
 	c.gpGetString = gs.get("glGetString")
+
+	// A missing function of the instanced draws must not fail the context.
+	// glVertexAttribDivisor is core in OpenGL 3.3, and the context might be OpenGL 3.2.
+	gi := procAddressGetter{ctx: c}
+	c.gpDrawElementsInstanced = gi.get("glDrawElementsInstanced")
+	c.gpVertexAttribDivisor = gi.get("glVertexAttribDivisor")
+	c.hasInstancing = gi.error() == nil
 	return nil
+}
+
+func (c *defaultContext) HasInstancing() bool {
+	return c.hasInstancing
 }
 
 // cStr takes a Go string (with or without null-termination)

@@ -414,6 +414,11 @@ func (i *imageImpl) regionWithPadding() image.Rectangle {
 //	10: Custom2
 //	11: Custom3
 func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32) {
+	// A shader with instance attributes draws only a mesh.
+	if len(shader.ir.Attributes) > 4 {
+		panic("atlas: Image.DrawTriangles: a shader with instance attributes can draw only a mesh")
+	}
+
 	backendsM.Lock()
 	defer backendsM.Unlock()
 
@@ -511,6 +516,63 @@ func (i *Image) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 	}
 
 	i.backend.backendImage.DrawTriangles(imgs, vertices, indices, blend, dstRegion, srcRegions, shader.ensureShader(), uniforms)
+}
+
+// NewMesh enqueues the upload of a mesh.
+func NewMesh(vertices []float32, indices []uint32) *graphicscommand.Mesh {
+	backendsM.Lock()
+	defer backendsM.Unlock()
+	return graphicscommand.NewMesh(vertices, indices)
+}
+
+// DrawMesh draws the mesh once for each instance record.
+func (i *Image) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Image, mesh *graphicscommand.Mesh, instances []float32, blend graphicsdriver.Blend, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32) {
+	backendsM.Lock()
+	defer backendsM.Unlock()
+
+	if !inFrame {
+		panic("atlas: Image.DrawMesh must be called in a frame")
+	}
+	if i.imageType != ImageTypeUnmanaged {
+		panic("atlas: Image.DrawMesh: the destination must be an unmanaged image")
+	}
+	if len(shader.ir.Attributes) != 8 {
+		panic("atlas: Image.DrawMesh: the shader must have a vertex function with instance attributes")
+	}
+
+	backends := make([]*backend, 0, len(srcs))
+	for _, src := range srcs {
+		if src == nil {
+			continue
+		}
+		if src.backend == nil {
+			src.allocate(nil, false)
+		}
+		backends = append(backends, src.backend)
+		src.backend.sourceInThisFrame = true
+	}
+
+	i.ensureIsolatedFromSource(backends)
+
+	var imgs [graphics.ShaderSrcImageCount]*graphicscommand.Image
+	for j, src := range srcs {
+		if src == nil {
+			continue
+		}
+		if i.backend.backendImage == src.backend.backendImage {
+			panic("atlas: Image.DrawMesh: source must be different from the receiver")
+		}
+		if !srcRegions[j].Empty() {
+			srcRegions[j] = srcRegions[j].Add(src.regionWithPadding().Min)
+		}
+		imgs[j] = src.backend.backendImage
+		if !src.isOnSourceBackend() && src.canBePutOnAtlas() {
+			imagesToPutOnSourceBackend.add(src)
+		}
+	}
+
+	// An unmanaged image is not on an atlas, so its region starts at (0, 0).
+	i.backend.backendImage.DrawMesh(imgs, mesh, instances, blend, image.Rect(0, 0, i.width, i.height), srcRegions, shader.ensureShader(), uniforms)
 }
 
 // WritePixels replaces the pixels on the image.

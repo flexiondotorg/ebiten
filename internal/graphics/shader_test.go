@@ -22,6 +22,8 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2/internal/graphics"
 	"github.com/hajimehoshi/ebiten/v2/internal/shaderir/glsl"
+	"github.com/hajimehoshi/ebiten/v2/internal/shaderir/hlsl"
+	"github.com/hajimehoshi/ebiten/v2/internal/shaderir/msl"
 )
 
 func TestCompileShaderUnitDirective(t *testing.T) {
@@ -128,6 +130,74 @@ func TestCompileShaderUserVertexSignature(t *testing.T) {
 		{
 			name:   "fewer varyings",
 			vertex: "func Vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4) (vec4, vec2, vec4) {\n\treturn vec4(dstPos, 0, 1), srcPos, color\n}",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			src := "//kage:unit pixels\n\npackage main\n\n" + c.vertex + "\n\nfunc Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {\n\treturn color\n}\n"
+			if _, err := graphics.CompileShader([]byte(src)); err == nil {
+				t.Errorf("CompileShader must return an error but does not")
+			}
+		})
+	}
+}
+
+const instancedVertexShaderSource = `//kage:unit pixels
+
+package main
+
+func Vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4, iDstPos vec2, iSrcPos vec2, iColor vec4, iCustom vec4) (vec4, vec2, vec4, vec4) {
+	return imageDstProjection() * vec4(dstPos+iDstPos+iSrcPos, 0, 1), srcPos, color * iColor, custom + iCustom
+}
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+	return color
+}
+`
+
+func TestCompileShaderInstancedVertex(t *testing.T) {
+	ir, err := graphics.CompileShader([]byte(instancedVertexShaderSource))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ir.UserVertex {
+		t.Errorf("ir.UserVertex: got: false, want: true")
+	}
+	if got, want := len(ir.Attributes), 8; got != want {
+		t.Errorf("len(ir.Attributes): got: %d, want: %d", got, want)
+	}
+
+	vs, _, _, _ := hlsl.Compile(ir)
+	if want := "Varyings VSMain(float2 A0 : POSITION, float2 A1 : TEXCOORD, float4 A2 : COLOR0, float4 A3 : COLOR1, float2 A4 : TEXCOORD1, float2 A5 : TEXCOORD2, float4 A6 : COLOR4, float4 A7 : COLOR5) {"; !strings.Contains(vs, want) {
+		t.Errorf("HLSL: the vertex shader must contain %q but does not:\n%s", want, vs)
+	}
+
+	m := msl.Compile(ir)
+	for _, want := range []string{
+		"struct Attributes {\n\tfloat2 M0;\n\tfloat2 M1;\n\tfloat4 M2;\n\tfloat4 M3;\n};",
+		"struct InstanceAttributes {\n\tfloat2 M0;\n\tfloat2 M1;\n\tfloat4 M2;\n\tfloat4 M3;\n};",
+		"\tuint iid [[instance_id]],\n\tconst device InstanceAttributes* instances [[buffer(2)]]",
+		"instances[iid].M0",
+		"instances[iid].M3",
+	} {
+		if !strings.Contains(m, want) {
+			t.Errorf("MSL: the shader must contain %q but does not:\n%s", want, m)
+		}
+	}
+}
+
+func TestCompileShaderInstancedVertexSignature(t *testing.T) {
+	cases := []struct {
+		name   string
+		vertex string
+	}{
+		{
+			name:   "five attributes",
+			vertex: "func Vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4, iDstPos vec2) (vec4, vec2, vec4, vec4) {\n\treturn vec4(dstPos+iDstPos, 0, 1), srcPos, color, custom\n}",
+		},
+		{
+			name:   "wrong instance attribute type",
+			vertex: "func Vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4, iDstPos vec4, iSrcPos vec2, iColor vec4, iCustom vec4) (vec4, vec2, vec4, vec4) {\n\treturn iDstPos, srcPos, color, custom\n}",
 		},
 	}
 	for _, c := range cases {

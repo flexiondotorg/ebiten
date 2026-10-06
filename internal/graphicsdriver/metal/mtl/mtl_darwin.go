@@ -532,6 +532,7 @@ var (
 	sel_setBlendColorRed_green_blue_alpha                                                                                             = objc.RegisterName("setBlendColorRed:green:blue:alpha:")
 	sel_drawPrimitives_vertexStart_vertexCount                                                                                        = objc.RegisterName("drawPrimitives:vertexStart:vertexCount:")
 	sel_drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferOffset                                                      = objc.RegisterName("drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:")
+	sel_drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferOffset_instanceCount                                        = objc.RegisterName("drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:")
 	sel_synchronizeResource                                                                                                           = objc.RegisterName("synchronizeResource:")
 	sel_synchronizeTexture_slice_level                                                                                                = objc.RegisterName("synchronizeTexture:slice:level:")
 	sel_copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin = objc.RegisterName("copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:")
@@ -1080,6 +1081,15 @@ func (rce RenderCommandEncoder) DrawIndexedPrimitives(typ PrimitiveType, indexCo
 		uintptr(typ), uintptr(indexCount), uintptr(indexType), uintptr(indexBuffer.buffer), uintptr(indexBufferOffset))
 }
 
+// DrawIndexedPrimitivesInstanced encodes a command to render a number of instances of primitives using an index list specified in a buffer.
+//
+// Reference: https://developer.apple.com/documentation/metal/mtlrendercommandencoder/drawindexedprimitives(type:indexcount:indextype:indexbuffer:indexbufferoffset:instancecount:)?language=objc.
+func (rce RenderCommandEncoder) DrawIndexedPrimitivesInstanced(typ PrimitiveType, indexCount int, indexType IndexType, indexBuffer Buffer, indexBufferOffset int, instanceCount int) {
+	objcutil.Send(rce.commandEncoder,
+		sel_drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferOffset_instanceCount,
+		uintptr(typ), uintptr(indexCount), uintptr(indexType), uintptr(indexBuffer.buffer), uintptr(indexBufferOffset), uintptr(instanceCount))
+}
+
 // BlitCommandEncoder is an encoder that specifies resource copy
 // and resource synchronization commands.
 //
@@ -1240,12 +1250,28 @@ func (b Buffer) Length() uintptr {
 }
 
 func (b Buffer) CopyToContents(data unsafe.Pointer, lengthInBytes uintptr) {
+	copy(unsafe.Slice((*byte)(b.Contents()), lengthInBytes), unsafe.Slice((*byte)(data), lengthInBytes))
+	b.DidModifyRange(0, lengthInBytes)
+}
+
+// Contents returns the address of the contents of the buffer. The address does not change.
+//
+// Reference: https://developer.apple.com/documentation/metal/mtlbuffer/contents()?language=objc.
+func (b Buffer) Contents() unsafe.Pointer {
 	contents := objcutil.Send(b.buffer, sel_contents)
-	copy(unsafe.Slice(*(**byte)(unsafe.Pointer(&contents)), lengthInBytes), unsafe.Slice((*byte)(data), lengthInBytes))
-	if runtime.GOOS != "ios" {
-		// The argument is an NSRange of the location and the length, which travels in two integer registers.
-		objcutil.Send(b.buffer, sel_didModifyRange, 0, lengthInBytes)
+	return *(*unsafe.Pointer)(unsafe.Pointer(&contents))
+}
+
+// DidModifyRange informs the GPU that the CPU has modified a range of a managed buffer. It does
+// nothing on iOS.
+//
+// Reference: https://developer.apple.com/documentation/metal/mtlbuffer/didmodifyrange(_:)?language=objc.
+func (b Buffer) DidModifyRange(location, length uintptr) {
+	if runtime.GOOS == "ios" {
+		return
 	}
+	// The argument is an NSRange of the location and the length, which travels in two integer registers.
+	objcutil.Send(b.buffer, sel_didModifyRange, location, length)
 }
 
 func (b Buffer) Retain() {

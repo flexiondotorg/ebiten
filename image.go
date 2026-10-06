@@ -788,6 +788,12 @@ type DrawTrianglesShaderOptions struct {
 	//
 	// Deprecated: as of v2.9. Use [github.com/hajimehoshi/ebiten/v2/vector.FillPath] instead.
 	AntiAlias bool
+
+	// Mesh draws the mesh once for each vertex in the vertices argument, which are then the
+	// instance records, not corners. The indices argument must be nil. The shader must have a
+	// Vertex function with eight parameters. The destination must be an unmanaged image, not a sub-image.
+	// FillRule and AntiAlias are ignored.
+	Mesh *Mesh
 }
 
 // Check the number of images.
@@ -882,11 +888,28 @@ func (i *Image) DrawTrianglesShader32(vertices []Vertex, indices []uint32, shade
 		return
 	}
 
-	if len(indices) == 0 {
+	// A draw with a mesh draws the mesh once for each vertex.
+	var mesh *Mesh
+	if options != nil {
+		mesh = options.Mesh
+	}
+	if mesh != nil {
+		if indices != nil {
+			panic("ebiten: indices must be nil with DrawTrianglesShaderOptions.Mesh")
+		}
+		if i.isSubImage() {
+			panic("ebiten: the destination must not be a sub-image with DrawTrianglesShaderOptions.Mesh")
+		}
+		if len(vertices) == 0 {
+			return
+		}
+	}
+
+	if mesh == nil && len(indices) == 0 {
 		return
 	}
 
-	if options != nil && (options.FillRule != FillRuleFillAll || options.AntiAlias) && !i.Bounds().Empty() {
+	if mesh == nil && options != nil && (options.FillRule != FillRuleFillAll || options.AntiAlias) && !i.Bounds().Empty() {
 		drawTrianglesShaderWithStencilBuffer(i, vertices, indices, shader, options)
 		return
 	}
@@ -985,6 +1008,11 @@ func (i *Image) DrawTrianglesShader32(vertices []Vertex, indices []uint32, shade
 
 	i.tmpUniforms = i.tmpUniforms[:0]
 	i.tmpUniforms = shader.appendUniforms(i.tmpUniforms, options.Uniforms)
+
+	if mesh != nil {
+		i.image.DrawMesh(imgs, mesh.mesh, vs, blend, srcRegions, shader.shader, i.tmpUniforms)
+		return
+	}
 
 	i.image.DrawTriangles(imgs, vs, indices, blend, i.adjustedBounds(), srcRegions, shader.shader, i.tmpUniforms, true)
 }

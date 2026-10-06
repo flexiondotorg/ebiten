@@ -17,6 +17,7 @@ package directx
 import (
 	"fmt"
 	"math"
+	"slices"
 	"unsafe"
 
 	"github.com/hajimehoshi/ebiten/v2/internal/graphics"
@@ -72,6 +73,20 @@ func init() {
 			InputSlotClass:       _D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
 			InstanceDataStepRate: 0,
 		})
+	}
+}
+
+// inputElementDescsForMeshDX12 is the input layout of a shader that draws a mesh: the vertex attributes,
+// then the same four elements again in input slot 1, for each instance. It is untested.
+var inputElementDescsForMeshDX12 []_D3D12_INPUT_ELEMENT_DESC
+
+func init() {
+	inputElementDescsForMeshDX12 = slices.Clone(inputElementDescsForDX12)
+	for i, s := range meshInstanceSemantics {
+		e := inputElementDescsForDX12[i]
+		e.SemanticName, e.SemanticIndex = s.name, s.index
+		e.InputSlot, e.InputSlotClass, e.InstanceDataStepRate = 1, _D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1
+		inputElementDescsForMeshDX12 = append(inputElementDescsForMeshDX12, e)
 	}
 }
 
@@ -184,6 +199,35 @@ func (p *pipelineStates) release() {
 }
 
 func (p *pipelineStates) drawTriangles(device *_ID3D12Device, commandList *_ID3D12GraphicsCommandList, frameIndex int, screen bool, srcs [graphics.ShaderSrcImageCount]*image12, shader *shader12, dstRegions []graphicsdriver.DstRegion, uniforms []uint32, blend graphicsdriver.Blend, indexOffset int) error {
+	if err := p.bindShaderResources(device, commandList, frameIndex, srcs, uniforms); err != nil {
+		return err
+	}
+
+	s, err := shader.pipelineState(blend, screen)
+	if err != nil {
+		return err
+	}
+	commandList.SetPipelineState(s)
+
+	for _, dstRegion := range dstRegions {
+		commandList.RSSetScissorRects([]_D3D12_RECT{
+			{
+				left:   int32(dstRegion.Region.Min.X),
+				top:    int32(dstRegion.Region.Min.Y),
+				right:  int32(dstRegion.Region.Max.X),
+				bottom: int32(dstRegion.Region.Max.Y),
+			},
+		})
+		commandList.DrawIndexedInstanced(uint32(dstRegion.IndexCount), 1, uint32(indexOffset), 0, 0)
+		indexOffset += dstRegion.IndexCount
+	}
+
+	return nil
+}
+
+// bindShaderResources writes the uniforms into a new constant buffer, makes the views of the constant
+// buffer and the source images, and binds them with the root signature.
+func (p *pipelineStates) bindShaderResources(device *_ID3D12Device, commandList *_ID3D12GraphicsCommandList, frameIndex int, srcs [graphics.ShaderSrcImageCount]*image12, uniforms []uint32) error {
 	idx := len(p.constantBuffers[frameIndex])
 	if idx >= numDescriptorsPerFrame {
 		return fmt.Errorf("directx: too many constant buffers")
@@ -286,25 +330,6 @@ func (p *pipelineStates) drawTriangles(device *_ID3D12Device, commandList *_ID3D
 	commandList.SetGraphicsRootDescriptorTable(0, gh)
 	commandList.SetGraphicsRootDescriptorTable(1, gh)
 
-	s, err := shader.pipelineState(blend, screen)
-	if err != nil {
-		return err
-	}
-	commandList.SetPipelineState(s)
-
-	for _, dstRegion := range dstRegions {
-		commandList.RSSetScissorRects([]_D3D12_RECT{
-			{
-				left:   int32(dstRegion.Region.Min.X),
-				top:    int32(dstRegion.Region.Min.Y),
-				right:  int32(dstRegion.Region.Max.X),
-				bottom: int32(dstRegion.Region.Max.Y),
-			},
-		})
-		commandList.DrawIndexedInstanced(uint32(dstRegion.IndexCount), 1, uint32(indexOffset), 0, 0)
-		indexOffset += dstRegion.IndexCount
-	}
-
 	return nil
 }
 
@@ -371,7 +396,8 @@ func (p *pipelineStates) ensureRootSignature(device *_ID3D12Device) (*_ID3D12Roo
 	return p.rootSignature, nil
 }
 
-func (p *pipelineStates) newPipelineState(device *_ID3D12Device, vsh, psh *_ID3DBlob, blend graphicsdriver.Blend, screen bool) (*_ID3D12PipelineState, error) {
+// newPipelineState makes a pipeline state. With mesh, it takes the input layout of a mesh draw, which is untested.
+func (p *pipelineStates) newPipelineState(device *_ID3D12Device, vsh, psh *_ID3DBlob, blend graphicsdriver.Blend, screen bool, mesh bool) (*_ID3D12PipelineState, error) {
 	rootSignature, err := p.ensureRootSignature(device)
 	if err != nil {
 		return nil, err
@@ -382,6 +408,11 @@ func (p *pipelineStates) newPipelineState(device *_ID3D12Device, vsh, psh *_ID3D
 	rtvFormat := _DXGI_FORMAT_R8G8B8A8_UNORM
 	if screen {
 		rtvFormat = _DXGI_FORMAT_B8G8R8A8_UNORM
+	}
+
+	inputElementDescs := inputElementDescsForDX12
+	if mesh {
+		inputElementDescs = inputElementDescsForMeshDX12
 	}
 
 	// Create a pipeline state.
@@ -428,8 +459,8 @@ func (p *pipelineStates) newPipelineState(device *_ID3D12Device, vsh, psh *_ID3D
 			ConservativeRaster:    _D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF,
 		},
 		InputLayout: _D3D12_INPUT_LAYOUT_DESC{
-			pInputElementDescs: &inputElementDescsForDX12[0],
-			NumElements:        uint32(len(inputElementDescsForDX12)),
+			pInputElementDescs: &inputElementDescs[0],
+			NumElements:        uint32(len(inputElementDescs)),
 		},
 		PrimitiveTopologyType: _D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
 		NumRenderTargets:      1,

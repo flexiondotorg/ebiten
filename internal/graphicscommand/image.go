@@ -151,6 +151,22 @@ func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 	theCommandQueueManager.enqueueDrawTrianglesCommand(i, srcs, vertices, indices, blend, dstRegion, srcRegions, shader, uniforms)
 }
 
+// DrawMesh draws the mesh once for each instance record.
+func (i *Image) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Image, mesh *Mesh, instances []float32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32) {
+	for _, src := range srcs {
+		if src == nil {
+			continue
+		}
+		if src.screen {
+			panic("graphicscommand: the screen image cannot be the rendering source")
+		}
+		src.flushBufferedWritePixels()
+	}
+	i.flushBufferedWritePixels()
+
+	theCommandQueueManager.enqueueDrawMeshCommand(i, srcs, mesh, instances, blend, dstRegion, srcRegions, shader, uniforms)
+}
+
 // ReadPixels reads the image's pixels.
 // ReadPixels returns an error when an error happens in the graphics driver.
 func (i *Image) ReadPixels(graphicsDriver graphicsdriver.Graphics, args []graphicsdriver.PixelsArgs) error {

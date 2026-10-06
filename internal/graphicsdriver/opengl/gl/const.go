@@ -52,6 +52,8 @@ const (
 	SRC_ALPHA             = 0x0302
 	SRC_ALPHA_SATURATE    = 0x0308
 	SRC_COLOR             = 0x0300
+	STATIC_DRAW           = 0x88E4
+	STREAM_DRAW           = 0x88E0
 	TEXTURE0              = 0x84C0
 	TEXTURE_2D            = 0x0DE1
 	TEXTURE_MAG_FILTER    = 0x2800

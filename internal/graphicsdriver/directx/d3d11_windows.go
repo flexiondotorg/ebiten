@@ -867,6 +867,12 @@ func (i *_ID3D11DeviceContext) DrawIndexed(indexCount uint32, startIndexLocation
 		0, 0)
 }
 
+// DrawIndexedInstanced is untested.
+func (i *_ID3D11DeviceContext) DrawIndexedInstanced(indexCountPerInstance uint32, instanceCount uint32, startIndexLocation uint32, baseVertexLocation int32, startInstanceLocation uint32) {
+	_, _, _ = syscall.Syscall6(i.vtbl.DrawIndexedInstanced, 6, uintptr(unsafe.Pointer(i)),
+		uintptr(indexCountPerInstance), uintptr(instanceCount), uintptr(startIndexLocation), uintptr(baseVertexLocation), uintptr(startInstanceLocation))
+}
+
 func (i *_ID3D11DeviceContext) IASetIndexBuffer(pIndexBuffer *_ID3D11Buffer, format _DXGI_FORMAT, offset uint32) {
 	_, _, _ = syscall.Syscall6(i.vtbl.IASetIndexBuffer, 4, uintptr(unsafe.Pointer(i)),
 		uintptr(unsafe.Pointer(pIndexBuffer)), uintptr(format), uintptr(offset),

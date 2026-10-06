@@ -266,6 +266,13 @@ func completeShaderSource(fragmentSrc []byte, userVertex bool) []byte {
 // The first returning value is the clip-space position, for example imageDstProjection() * vec4(pos, 0, 1)
 // for a position pos on the destination texture in pixels.
 // Fragment receives the fragment's position as before, then the other three returning values in order.
+//
+// For a draw with a mesh, the function may take the four attributes twice:
+//
+//	func Vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4, iDstPos vec2, iSrcPos vec2, iColor vec4, iCustom vec4) (vec4, vec2, vec4, vec4)
+//
+// The last four in-params are the fields of the instance record that the GPU draws.
+// A shader with this signature draws only with a mesh, and a shader without it only without one.
 func CompileShader(fragmentSrc []byte) (*shaderir.Program, error) {
 	value, err := ParseKageUnitDirective(fragmentSrc)
 	if err != nil {
@@ -294,9 +301,14 @@ func CompileShader(fragmentSrc []byte) (*shaderir.Program, error) {
 	}
 
 	if userVertex {
-		if !slices.EqualFunc(ir.Attributes, vertexAttributeTypes, func(a, b shaderir.Type) bool { return a.Equal(&b) }) ||
-			!slices.EqualFunc(ir.Varyings, vertexAttributeTypes[1:], func(a, b shaderir.Type) bool { return a.Equal(&b) }) {
-			return nil, fmt.Errorf("graphics: vertex shader entry point '%s' must be func(vec2, vec2, vec4, vec4) (vec4, vec2, vec4, vec4)", vert)
+		equal := func(a, b shaderir.Type) bool { return a.Equal(&b) }
+		// A draw with a mesh reads the four attributes a second time for each instance.
+		attrs := ir.Attributes
+		if n := len(vertexAttributeTypes); len(attrs) == 2*n && slices.EqualFunc(attrs[:n], attrs[n:], equal) {
+			attrs = attrs[:n]
+		}
+		if !slices.EqualFunc(attrs, vertexAttributeTypes, equal) || !slices.EqualFunc(ir.Varyings, vertexAttributeTypes[1:], equal) {
+			return nil, fmt.Errorf("graphics: vertex shader entry point '%s' must be func(vec2, vec2, vec4, vec4) (vec4, vec2, vec4, vec4), or take the four in-params twice", vert)
 		}
 		ir.UserVertex = true
 	}
