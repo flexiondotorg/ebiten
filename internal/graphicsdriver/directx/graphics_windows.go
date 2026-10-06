@@ -29,6 +29,7 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2/internal/graphicsdriver"
 	"github.com/hajimehoshi/ebiten/v2/internal/microsoftgdk"
+	"github.com/hajimehoshi/ebiten/v2/internal/shaderir"
 	"github.com/hajimehoshi/ebiten/v2/internal/winver"
 )
 
@@ -42,6 +43,23 @@ const maxFrameLatencyWithoutVsync = 3
 
 // frameLatencyWaitTimeout is the maximum time in milliseconds to wait for a queued frame to be shown.
 const frameLatencyWaitTimeout = 1000
+
+// meshInstanceSemantics are the semantics that the HLSL emitter gives the fifth to the eighth vertex
+// attributes, which a mesh draw reads for each instance. This is untested.
+var meshInstanceSemantics = []struct {
+	name  *byte
+	index uint32
+}{
+	{&([]byte("TEXCOORD\000"))[0], 1},
+	{&([]byte("TEXCOORD\000"))[0], 2},
+	{&([]byte("COLOR\000"))[0], 4},
+	{&([]byte("COLOR\000"))[0], 5},
+}
+
+// isMeshProgram reports whether the program reads the instance attributes of a mesh draw.
+func isMeshProgram(program *shaderir.Program) bool {
+	return len(program.Attributes) > 4
+}
 
 func pow2(x uint32) uint32 {
 	if x > (math.MaxUint32+1)/2 {
