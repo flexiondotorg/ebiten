@@ -842,22 +842,80 @@ func (cb CommandBuffer) WaitUntilScheduled() {
 //
 // Reference: https://developer.apple.com/documentation/metal/mtlcommandbuffer/1442999-rendercommandencoderwithdescript?language=objc.
 func (cb CommandBuffer) RenderCommandEncoderWithDescriptor(rpd RenderPassDescriptor) (RenderCommandEncoder, error) {
-	var renderPassDescriptor = objc.ID(class_MTLRenderPassDescriptor).Send(sel_new)
-	var colorAttachments0 = renderPassDescriptor.Send(sel_colorAttachments).Send(sel_objectAtIndexedSubscript, 0)
-	colorAttachments0.Send(sel_setLoadAction, int(rpd.ColorAttachments[0].LoadAction))
-	colorAttachments0.Send(sel_setStoreAction, int(rpd.ColorAttachments[0].StoreAction))
-	colorAttachments0.Send(sel_setTexture, rpd.ColorAttachments[0].Texture.texture)
-	colorAttachments0.Send(sel_setClearColor, rpd.ColorAttachments[0].ClearColor)
-	var stencilAttachment = renderPassDescriptor.Send(sel_stencilAttachment)
-	stencilAttachment.Send(sel_setLoadAction, int(rpd.StencilAttachment.LoadAction))
-	stencilAttachment.Send(sel_setStoreAction, int(rpd.StencilAttachment.StoreAction))
-	stencilAttachment.Send(sel_setTexture, rpd.StencilAttachment.Texture.texture)
-	if rpd.RenderTargetWidth > 0 && rpd.RenderTargetHeight > 0 && hasRenderTargetSize(renderPassDescriptor) {
-		renderPassDescriptor.Send(sel_setRenderTargetWidth, rpd.RenderTargetWidth)
-		renderPassDescriptor.Send(sel_setRenderTargetHeight, rpd.RenderTargetHeight)
+	var c RenderPassDescriptorCache
+	defer c.Release()
+	return cb.RenderCommandEncoderWithDescriptorCache(&c, rpd)
+}
+
+// RenderPassDescriptorCache keeps MTLRenderPassDescriptor objects to create render command
+// encoders, so that an encoder does not create a descriptor. A cache must be used on one thread at
+// a time.
+type RenderPassDescriptorCache struct {
+	// descriptors are for a pass without a render target size, and for a pass with one.
+	descriptors [2]renderPassDescriptorObject
+}
+
+type renderPassDescriptorObject struct {
+	descriptor        objc.ID
+	colorAttachment0  objc.ID
+	stencilAttachment objc.ID
+	clearColor        ClearColor
+}
+
+// Release releases the descriptors of the cache.
+func (c *RenderPassDescriptorCache) Release() {
+	for i := range c.descriptors {
+		if d := c.descriptors[i].descriptor; d != 0 {
+			objcutil.Send(d, sel_release)
+		}
+		c.descriptors[i] = renderPassDescriptorObject{}
 	}
-	var rce = cb.commandBuffer.Send(sel_renderCommandEncoderWithDescriptor, renderPassDescriptor)
-	renderPassDescriptor.Send(sel_release)
+}
+
+// RenderCommandEncoderWithDescriptorCache is like RenderCommandEncoderWithDescriptor, with a
+// descriptor from c. Metal copies the state of the descriptor when it creates the encoder, so the
+// next encoder can change it.
+func (cb CommandBuffer) RenderCommandEncoderWithDescriptorCache(c *RenderPassDescriptorCache, rpd RenderPassDescriptor) (RenderCommandEncoder, error) {
+	// Keep the render target size in its own descriptor, so that a pass without it does not
+	// inherit the size of an earlier pass.
+	withSize := rpd.RenderTargetWidth > 0 && rpd.RenderTargetHeight > 0
+	d := &c.descriptors[0]
+	if withSize {
+		d = &c.descriptors[1]
+	}
+	if d.descriptor == 0 {
+		d.descriptor = objc.ID(class_MTLRenderPassDescriptor).Send(sel_new)
+		d.colorAttachment0 = d.descriptor.Send(sel_colorAttachments).Send(sel_objectAtIndexedSubscript, 0)
+		d.stencilAttachment = d.descriptor.Send(sel_stencilAttachment)
+		d.colorAttachment0.Send(sel_setClearColor, rpd.ColorAttachments[0].ClearColor)
+		d.clearColor = rpd.ColorAttachments[0].ClearColor
+	}
+	if withSize && !hasRenderTargetSize(d.descriptor) {
+		withSize = false
+	}
+
+	// MTLClearColor is 4 doubles, which travel in the floating-point registers, so objcutil cannot
+	// send it. Set it only when it changes.
+	if d.clearColor != rpd.ColorAttachments[0].ClearColor {
+		d.colorAttachment0.Send(sel_setClearColor, rpd.ColorAttachments[0].ClearColor)
+		d.clearColor = rpd.ColorAttachments[0].ClearColor
+	}
+	objcutil.Send(d.colorAttachment0, sel_setLoadAction, uintptr(rpd.ColorAttachments[0].LoadAction))
+	objcutil.Send(d.colorAttachment0, sel_setStoreAction, uintptr(rpd.ColorAttachments[0].StoreAction))
+	objcutil.Send(d.colorAttachment0, sel_setTexture, uintptr(rpd.ColorAttachments[0].Texture.texture))
+	objcutil.Send(d.stencilAttachment, sel_setLoadAction, uintptr(rpd.StencilAttachment.LoadAction))
+	objcutil.Send(d.stencilAttachment, sel_setStoreAction, uintptr(rpd.StencilAttachment.StoreAction))
+	objcutil.Send(d.stencilAttachment, sel_setTexture, uintptr(rpd.StencilAttachment.Texture.texture))
+	if withSize {
+		objcutil.Send(d.descriptor, sel_setRenderTargetWidth, uintptr(rpd.RenderTargetWidth))
+		objcutil.Send(d.descriptor, sel_setRenderTargetHeight, uintptr(rpd.RenderTargetHeight))
+	}
+	rce := objc.ID(objcutil.Send(cb.commandBuffer, sel_renderCommandEncoderWithDescriptor, uintptr(d.descriptor)))
+
+	// Do not keep the textures, for example a drawable, alive in the descriptor.
+	objcutil.Send(d.colorAttachment0, sel_setTexture, 0)
+	objcutil.Send(d.stencilAttachment, sel_setTexture, 0)
+
 	if rce == 0 {
 		return RenderCommandEncoder{}, errors.New("mtl: renderCommandEncoderWithDescriptor returned nil")
 	}

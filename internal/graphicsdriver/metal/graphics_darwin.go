@@ -45,6 +45,10 @@ type Graphics struct {
 	cb  mtl.CommandBuffer
 	rce mtl.RenderCommandEncoder
 
+	// rpdCache keeps the render pass descriptors, so that an encoder does not create one. It lives
+	// as long as the process.
+	rpdCache mtl.RenderPassDescriptorCache
+
 	screenDrawable ca.MetalDrawable
 
 	// frame is the current frame number.
@@ -572,7 +576,7 @@ func (g *Graphics) draw(dst *Image, dstRegions []graphicsdriver.DstRegion, srcs 
 		if err := g.ensureCommandBuffer(); err != nil {
 			return err
 		}
-		rce, err := g.cb.RenderCommandEncoderWithDescriptor(rpd)
+		rce, err := g.cb.RenderCommandEncoderWithDescriptorCache(&g.rpdCache, rpd)
 		if err != nil {
 			return fmt.Errorf("metal: cb.RenderCommandEncoderWithDescriptor failed: %w", err)
 		}
