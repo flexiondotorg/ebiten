@@ -79,6 +79,12 @@ type DebugInfo struct {
 	// TotalGPUImageMemoryUsageInBytes is the total image memory usage for GPU in bytes.
 	// TotalGPUImageMemoryUsageInBytes is approximately the total memory usage for GPU.
 	TotalGPUImageMemoryUsageInBytes int64
+
+	// GraphicsRenderer, GraphicsVendor, and GraphicsVersion are the renderer, the vendor, and the
+	// version that the graphics library reports: GL_RENDERER, GL_VENDOR, and GL_VERSION on OpenGL.
+	// They are empty before the graphics library starts and where the library reports none, as on
+	// Metal.
+	GraphicsRenderer, GraphicsVendor, GraphicsVersion string
 }
 
 // ReadDebugInfo writes debug info (e.g. current graphics library) into a provided struct.
@@ -92,6 +98,7 @@ func ReadDebugInfo(d *DebugInfo) {
 	}
 	d.GraphicsLibrary = GraphicsLibrary(ui.Get().GraphicsLibrary())
 	d.TotalGPUImageMemoryUsageInBytes = atlas.TotalGPUImageMemoryUsageInBytes()
+	d.GraphicsRenderer, d.GraphicsVendor, d.GraphicsVersion = ui.Get().RendererName()
 }
 
 // ColorSpace represents the color space of the screen.
