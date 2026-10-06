@@ -14,6 +14,12 @@
 
 package metal
 
+import (
+	"github.com/hajimehoshi/ebiten/v2/internal/graphicsdriver/metal/mtl"
+)
+
 var AppendUniformVariables = appendUniformVariables
 
-var TakeUnusedBuffer = takeUnusedBuffer
+func TakeUnusedBuffer(buffers map[mtl.Buffer]uintptr, length uintptr) mtl.Buffer {
+	return takeUnusedBuffer(buffers, length).buf
+}
