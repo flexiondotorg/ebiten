@@ -71,7 +71,10 @@ type Program struct {
 	// Kage source.
 	FragmentSource []byte
 
-	uniformFactors []uint32
+	// unusedUniformDwords holds the ranges [start, end) of the uniform dwords that the program never reads,
+	// in the order of the dwords. It is valid when unusedUniformDwordsReady is true.
+	unusedUniformDwords      [][2]int
+	unusedUniformDwordsReady bool
 }
 
 type Func struct {
@@ -557,27 +560,33 @@ func (p *Program) appendReachableUniformVariablesFromBlock(indices []int, block 
 // FilterUniformVariables replaces uniform variables with 0 when they are not used.
 // By minimizing uniform variables, more commands can be merged in the graphicscommand package.
 func (p *Program) FilterUniformVariables(uniforms []uint32) {
-	if p.uniformFactors == nil {
+	if !p.unusedUniformDwordsReady {
 		indices := p.appendReachableUniformVariablesFromBlock(nil, p.VertexFunc.Block)
 		indices = p.appendReachableUniformVariablesFromBlock(indices, p.FragmentFunc.Block)
 		reachableUniforms := make([]bool, len(p.Uniforms))
 		for _, idx := range indices {
 			reachableUniforms[idx] = true
 		}
-		p.uniformFactors = make([]uint32, len(uniforms))
 		var idx int
 		for i, typ := range p.Uniforms {
 			c := typ.DwordCount()
-			if reachableUniforms[i] {
-				for i := idx; i < idx+c; i++ {
-					p.uniformFactors[i] = 1
+			if !reachableUniforms[i] && c > 0 {
+				// Join the range to the previous one when they touch.
+				if n := len(p.unusedUniformDwords); n > 0 && p.unusedUniformDwords[n-1][1] == idx {
+					p.unusedUniformDwords[n-1][1] = idx + c
+				} else {
+					p.unusedUniformDwords = append(p.unusedUniformDwords, [2]int{idx, idx + c})
 				}
 			}
 			idx += c
 		}
+		if idx < len(uniforms) {
+			p.unusedUniformDwords = append(p.unusedUniformDwords, [2]int{idx, len(uniforms)})
+		}
+		p.unusedUniformDwordsReady = true
 	}
 
-	for i, factor := range p.uniformFactors {
-		uniforms[i] *= factor
+	for _, r := range p.unusedUniformDwords {
+		clear(uniforms[r[0]:r[1]])
 	}
 }
