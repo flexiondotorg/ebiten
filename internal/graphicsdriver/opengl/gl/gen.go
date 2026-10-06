@@ -113,14 +113,14 @@ var _ Context = (*DebugContext)(nil)
 		}
 
 		// Print logs.
-		if name != "LoadFunctions" && name != "IsES" {
+		if name != "LoadFunctions" && name != "IsES" && name != "HasTimerQuery" {
 			if _, err := fmt.Fprintf(out, "\tfmt.Fprintln(os.Stderr, %q)\n", name); err != nil {
 				return err
 			}
 		}
 
 		// Check errors.
-		if name != "LoadFunctions" && name != "IsES" && name != "GetError" {
+		if name != "LoadFunctions" && name != "IsES" && name != "HasTimerQuery" && name != "GetError" {
 			if _, err := fmt.Fprintf(out, `	if e := d.Context.GetError(); e != NO_ERROR {
 		panic(fmt.Sprintf("gl: GetError() returned %%d at %s", e))
 	}
