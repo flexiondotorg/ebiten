@@ -493,26 +493,29 @@ func (i *Image) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 	// TODO: Check if dstRegion does not to violate the region.
 	dstRegion = dstRegion.Add(r.Min)
 
-	dx, dy := float32(r.Min.X), float32(r.Min.Y)
+	// A shader with its own vertex function adds the origins itself, as its attributes might not be positions.
+	if !shader.ir.UserVertex {
+		dx, dy := float32(r.Min.X), float32(r.Min.Y)
 
-	var oxf, oyf float32
-	if srcs[0] != nil {
-		r := srcs[0].regionWithPadding()
-		oxf, oyf = float32(r.Min.X), float32(r.Min.Y)
-		if dx != 0 || dy != 0 || oxf != 0 || oyf != 0 {
+		var oxf, oyf float32
+		if srcs[0] != nil {
+			r := srcs[0].regionWithPadding()
+			oxf, oyf = float32(r.Min.X), float32(r.Min.Y)
+			if dx != 0 || dy != 0 || oxf != 0 || oyf != 0 {
+				n := len(vertices)
+				for i := 0; i < n; i += graphics.VertexFloatCount {
+					vertices[i] += dx
+					vertices[i+1] += dy
+					vertices[i+2] += oxf
+					vertices[i+3] += oyf
+				}
+			}
+		} else if dx != 0 || dy != 0 {
 			n := len(vertices)
 			for i := 0; i < n; i += graphics.VertexFloatCount {
 				vertices[i] += dx
 				vertices[i+1] += dy
-				vertices[i+2] += oxf
-				vertices[i+3] += oyf
 			}
-		}
-	} else if dx != 0 || dy != 0 {
-		n := len(vertices)
-		for i := 0; i < n; i += graphics.VertexFloatCount {
-			vertices[i] += dx
-			vertices[i+1] += dy
 		}
 	}
 
