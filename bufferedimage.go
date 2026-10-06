@@ -198,6 +198,28 @@ func (b *bufferedImage) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*buffer
 	b.cache.reset()
 }
 
+// DrawMesh draws the mesh once for each instance record.
+func (b *bufferedImage) DrawMesh(srcs [graphics.ShaderSrcImageCount]*bufferedImage, mesh *graphicscommand.Mesh, instances []float32, blend graphicsdriver.Blend, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *ui.Shader, uniforms []uint32) {
+	var imgs [graphics.ShaderSrcImageCount]*ui.Image
+	for i, src := range srcs {
+		if src == nil {
+			continue
+		}
+		if src == b {
+			panic("ebiten: bufferedImage.DrawMesh: source images must be different from the receiver")
+		}
+		src.writeBackPixelsIfNeeded()
+		imgs[i] = src.image
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.cache.writeBackPixelsIfNeeded(b.image)
+	b.image.DrawMesh(imgs, mesh, instances, blend, srcRegions, shader, uniforms)
+	b.cache.reset()
+}
+
 // Fill fills the region with the given premultiplied-alpha color.
 func (b *bufferedImage) Fill(cr, cg, cb, ca float32, region image.Rectangle) {
 	b.mu.Lock()
