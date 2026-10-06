@@ -469,14 +469,17 @@ func (i *Image) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 	if srcs[0] != nil {
 		r := srcs[0].regionWithPadding()
 		oxf, oyf = float32(r.Min.X), float32(r.Min.Y)
-		n := len(vertices)
-		for i := 0; i < n; i += graphics.VertexFloatCount {
-			vertices[i] += dx
-			vertices[i+1] += dy
-			vertices[i+2] += oxf
-			vertices[i+3] += oyf
+		// Adding zero offsets changes no position, so skip the loop.
+		if dx != 0 || dy != 0 || oxf != 0 || oyf != 0 {
+			n := len(vertices)
+			for i := 0; i < n; i += graphics.VertexFloatCount {
+				vertices[i] += dx
+				vertices[i+1] += dy
+				vertices[i+2] += oxf
+				vertices[i+3] += oyf
+			}
 		}
-	} else {
+	} else if dx != 0 || dy != 0 {
 		n := len(vertices)
 		for i := 0; i < n; i += graphics.VertexFloatCount {
 			vertices[i] += dx
