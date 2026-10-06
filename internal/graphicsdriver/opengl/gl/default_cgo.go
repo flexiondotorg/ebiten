@@ -927,3 +927,22 @@ func (c *defaultContext) LoadFunctions() error {
 
 	return g.error()
 }
+
+// HasTimerQuery reports false: this context does not load the query functions, and they do nothing.
+func (c *defaultContext) HasTimerQuery() bool {
+	return false
+}
+
+func (c *defaultContext) BeginQuery(target uint32, query uint32) {
+}
+
+func (c *defaultContext) CreateQuery() uint32 {
+	return 0
+}
+
+func (c *defaultContext) EndQuery(target uint32) {
+}
+
+func (c *defaultContext) GetQueryObjectui(query uint32, pname uint32) uint32 {
+	return 0
+}

@@ -45,6 +45,14 @@ func (d *DebugContext) AttachShader(arg0 uint32, arg1 uint32) {
 	}
 }
 
+func (d *DebugContext) BeginQuery(arg0 uint32, arg1 uint32) {
+	d.Context.BeginQuery(arg0, arg1)
+	fmt.Fprintln(os.Stderr, "BeginQuery")
+	if e := d.Context.GetError(); e != NO_ERROR {
+		panic(fmt.Sprintf("gl: GetError() returned %d at BeginQuery", e))
+	}
+}
+
 func (d *DebugContext) BindAttribLocation(arg0 uint32, arg1 uint32, arg2 string) {
 	d.Context.BindAttribLocation(arg0, arg1, arg2)
 	fmt.Fprintln(os.Stderr, "BindAttribLocation")
@@ -161,6 +169,15 @@ func (d *DebugContext) CreateProgram() uint32 {
 	return out0
 }
 
+func (d *DebugContext) CreateQuery() uint32 {
+	out0 := d.Context.CreateQuery()
+	fmt.Fprintln(os.Stderr, "CreateQuery")
+	if e := d.Context.GetError(); e != NO_ERROR {
+		panic(fmt.Sprintf("gl: GetError() returned %d at CreateQuery", e))
+	}
+	return out0
+}
+
 func (d *DebugContext) CreateShader(arg0 uint32) uint32 {
 	out0 := d.Context.CreateShader(arg0)
 	fmt.Fprintln(os.Stderr, "CreateShader")
@@ -260,6 +277,14 @@ func (d *DebugContext) EnableVertexAttribArray(arg0 uint32) {
 	}
 }
 
+func (d *DebugContext) EndQuery(arg0 uint32) {
+	d.Context.EndQuery(arg0)
+	fmt.Fprintln(os.Stderr, "EndQuery")
+	if e := d.Context.GetError(); e != NO_ERROR {
+		panic(fmt.Sprintf("gl: GetError() returned %d at EndQuery", e))
+	}
+}
+
 func (d *DebugContext) Finish() {
 	d.Context.Finish()
 	fmt.Fprintln(os.Stderr, "Finish")
@@ -326,6 +351,15 @@ func (d *DebugContext) GetProgrami(arg0 uint32, arg1 uint32) int {
 	return out0
 }
 
+func (d *DebugContext) GetQueryObjectui(arg0 uint32, arg1 uint32) uint32 {
+	out0 := d.Context.GetQueryObjectui(arg0, arg1)
+	fmt.Fprintln(os.Stderr, "GetQueryObjectui")
+	if e := d.Context.GetError(); e != NO_ERROR {
+		panic(fmt.Sprintf("gl: GetError() returned %d at GetQueryObjectui", e))
+	}
+	return out0
+}
+
 func (d *DebugContext) GetShaderInfoLog(arg0 uint32) string {
 	out0 := d.Context.GetShaderInfoLog(arg0)
 	fmt.Fprintln(os.Stderr, "GetShaderInfoLog")
@@ -350,6 +384,11 @@ func (d *DebugContext) GetUniformLocation(arg0 uint32, arg1 string) int32 {
 	if e := d.Context.GetError(); e != NO_ERROR {
 		panic(fmt.Sprintf("gl: GetError() returned %d at GetUniformLocation", e))
 	}
+	return out0
+}
+
+func (d *DebugContext) HasTimerQuery() bool {
+	out0 := d.Context.HasTimerQuery()
 	return out0
 }
 

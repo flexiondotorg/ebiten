@@ -27,8 +27,13 @@ type Context interface {
 	LoadFunctions() error
 	IsES() bool
 
+	// HasTimerQuery reports whether BeginQuery and EndQuery measure TIME_ELAPSED, from OpenGL 3.3,
+	// GL_ARB_timer_query, or GL_EXT_disjoint_timer_query on OpenGL ES.
+	HasTimerQuery() bool
+
 	ActiveTexture(texture uint32)
 	AttachShader(program uint32, shader uint32)
+	BeginQuery(target uint32, query uint32)
 	BindAttribLocation(program uint32, index uint32, name string)
 	BindBuffer(target uint32, buffer uint32)
 	BindFramebuffer(target uint32, framebuffer uint32)
@@ -43,6 +48,7 @@ type Context interface {
 	CreateBuffer() uint32
 	CreateFramebuffer() uint32
 	CreateProgram() uint32
+	CreateQuery() uint32
 	CreateShader(xtype uint32) uint32
 	CreateTexture() uint32
 	CreateVertexArray() uint32
@@ -55,6 +61,7 @@ type Context interface {
 	DrawElements(mode uint32, count int32, xtype uint32, offset int)
 	Enable(cap uint32)
 	EnableVertexAttribArray(index uint32)
+	EndQuery(target uint32)
 	Finish()
 	Flush()
 	FramebufferTexture2D(target uint32, attachment uint32, textarget uint32, texture uint32, level int32)
@@ -63,6 +70,7 @@ type Context interface {
 	GetInteger(pname uint32) int
 	GetProgramInfoLog(program uint32) string
 	GetProgrami(program uint32, pname uint32) int
+	GetQueryObjectui(query uint32, pname uint32) uint32
 	GetShaderInfoLog(shader uint32) string
 	GetShaderi(shader uint32, pname uint32) int
 	GetUniformLocation(program uint32, name string) int32

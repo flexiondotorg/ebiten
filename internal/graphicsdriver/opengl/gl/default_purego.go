@@ -24,6 +24,14 @@ import (
 )
 
 type defaultContext struct {
+	// The query functions are optional: hasTimerQuery reports whether the context has them.
+	gpBeginQuery        uintptr
+	gpEndQuery          uintptr
+	gpGenQueries        uintptr
+	gpGetQueryObjectuiv uintptr
+	gpGetStringi        uintptr
+	hasTimerQuery       bool
+
 	gpActiveTexture           uintptr
 	gpAttachShader            uintptr
 	gpBindAttribLocation      uintptr
@@ -92,6 +100,7 @@ type defaultContext struct {
 
 	// pinner pins the Go objects of the calls that pass data in each frame.
 	pinner runtime.Pinner
+	out    uint32
 
 	isES bool
 }
@@ -277,9 +286,10 @@ func (c *defaultContext) GetExtension(name string) any {
 }
 
 func (c *defaultContext) GetInteger(pname uint32) int {
-	var dst int32
-	purego.SyscallN(c.gpGetIntegerv, uintptr(pname), uintptr(unsafe.Pointer(&dst)))
-	return int(dst)
+	c.pinner.Pin(&c.out)
+	c.call(c.gpGetIntegerv, uintptr(pname), uintptr(unsafe.Pointer(&c.out)))
+	c.pinner.Unpin()
+	return int(int32(c.out))
 }
 
 func (c *defaultContext) GetProgramInfoLog(program uint32) string {
@@ -515,7 +525,19 @@ func (c *defaultContext) LoadFunctions() error {
 	c.gpVertexAttribPointer = g.get("glVertexAttribPointer")
 	c.gpViewport = g.get("glViewport")
 
-	return g.error()
+	if err := g.error(); err != nil {
+		return err
+	}
+
+	// A missing query function must not fail the context.
+	gq := procAddressGetter{ctx: c}
+	c.gpBeginQuery = gq.get("glBeginQuery")
+	c.gpEndQuery = gq.get("glEndQuery")
+	c.gpGenQueries = gq.get("glGenQueries")
+	c.gpGetQueryObjectuiv = gq.get("glGetQueryObjectuiv")
+	c.gpGetStringi = gq.get("glGetStringi")
+	c.hasTimerQuery = gq.error() == nil && c.timerQuerySupported()
+	return nil
 }
 
 // cStr takes a Go string (with or without null-termination)
@@ -533,4 +555,50 @@ func cStr(str string) (cstr *byte, free func()) {
 		runtime.KeepAlive(bs)
 		bs = nil
 	}
+}
+
+func (c *defaultContext) HasTimerQuery() bool {
+	return c.hasTimerQuery
+}
+
+func (c *defaultContext) BeginQuery(target uint32, query uint32) {
+	c.call(c.gpBeginQuery, uintptr(target), uintptr(query))
+}
+
+func (c *defaultContext) CreateQuery() uint32 {
+	var query uint32
+	purego.SyscallN(c.gpGenQueries, 1, uintptr(unsafe.Pointer(&query)))
+	return query
+}
+
+func (c *defaultContext) EndQuery(target uint32) {
+	c.call(c.gpEndQuery, uintptr(target))
+}
+
+func (c *defaultContext) GetQueryObjectui(query uint32, pname uint32) uint32 {
+	c.pinner.Pin(&c.out)
+	c.call(c.gpGetQueryObjectuiv, uintptr(query), uintptr(pname), uintptr(unsafe.Pointer(&c.out)))
+	c.pinner.Unpin()
+	return c.out
+}
+
+// timerQuerySupported reports whether the context measures TIME_ELAPSED. The context must be current.
+func (c *defaultContext) timerQuerySupported() bool {
+	if !c.isES {
+		if major, minor := c.GetInteger(MAJOR_VERSION), c.GetInteger(MINOR_VERSION); major > 3 || major == 3 && minor >= 3 {
+			return true
+		}
+	}
+	ext := "GL_ARB_timer_query"
+	if c.isES {
+		ext = "GL_EXT_disjoint_timer_query"
+	}
+	var getStringi func(name uint32, index uint32) string
+	purego.RegisterFunc(&getStringi, c.gpGetStringi)
+	for i := range c.GetInteger(NUM_EXTENSIONS) {
+		if getStringi(EXTENSIONS, uint32(i)) == ext {
+			return true
+		}
+	}
+	return false
 }

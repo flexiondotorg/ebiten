@@ -67,6 +67,7 @@ func (i *Image) setViewport() error {
 }
 
 func (i *Image) ReadPixels(args []graphicsdriver.PixelsArgs) error {
+	i.graphics.endPass()
 	if err := i.ensureFramebuffer(); err != nil {
 		return err
 	}
@@ -114,6 +115,7 @@ func (i *Image) WritePixels(args []graphicsdriver.PixelsArgs) error {
 	if len(args) == 0 {
 		return nil
 	}
+	i.graphics.endPass()
 
 	// Some drivers process glTexSubImage2D without waiting for pending draw commands, even though
 	// commands in a single context must be processed in order (#211, #593, #3487).

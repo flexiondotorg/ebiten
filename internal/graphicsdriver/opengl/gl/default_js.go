@@ -586,3 +586,22 @@ func (c *defaultContext) VertexAttribPointer(index uint32, size int32, xtype uin
 func (c *defaultContext) Viewport(x int32, y int32, width int32, height int32) {
 	c.fnViewport.Invoke(x, y, width, height)
 }
+
+// HasTimerQuery reports false: WebGL 2 needs EXT_disjoint_timer_query_webgl2, which this context does not use.
+func (c *defaultContext) HasTimerQuery() bool {
+	return false
+}
+
+func (c *defaultContext) BeginQuery(target uint32, query uint32) {
+}
+
+func (c *defaultContext) CreateQuery() uint32 {
+	return 0
+}
+
+func (c *defaultContext) EndQuery(target uint32) {
+}
+
+func (c *defaultContext) GetQueryObjectui(query uint32, pname uint32) uint32 {
+	return 0
+}

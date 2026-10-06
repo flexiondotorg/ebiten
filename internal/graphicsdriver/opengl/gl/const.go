@@ -66,3 +66,15 @@ const (
 	VERTEX_SHADER         = 0x8B31
 	ZERO                  = 0
 )
+
+// Timer queries, from OpenGL 3.3, GL_ARB_timer_query, and GL_EXT_disjoint_timer_query.
+const (
+	EXTENSIONS             = 0x1F03
+	GPU_DISJOINT_EXT       = 0x8FBB
+	MAJOR_VERSION          = 0x821B
+	MINOR_VERSION          = 0x821C
+	NUM_EXTENSIONS         = 0x821D
+	QUERY_RESULT           = 0x8866
+	QUERY_RESULT_AVAILABLE = 0x8867
+	TIME_ELAPSED           = 0x88BF
+)
