@@ -15,6 +15,7 @@
 package mtl_test
 
 import (
+	"runtime"
 	"testing"
 	"unsafe"
 
@@ -243,6 +244,93 @@ func TestRenderPassDescriptorCache(t *testing.T) {
 	for i := 0; i < len(pixels); i += 4 {
 		if got, want := pixels[i:i+4], []byte{0xff, 0, 0, 0xff}; string(got) != string(want) {
 			t.Fatalf("pixel %d: got %v, want %v", i/4, got, want)
+		}
+	}
+}
+
+// TestCopyFromTexture checks a copy of a region between two textures, from an origin to another
+// origin, and that a copy on arm64 does not allocate.
+func TestCopyFromTexture(t *testing.T) {
+	device, err := mtl.CreateSystemDefaultDevice()
+	if err != nil {
+		t.Skip(err)
+	}
+
+	const size = 4
+	newTexture := func() mtl.Texture {
+		texture, err := device.NewTextureWithDescriptor(mtl.TextureDescriptor{
+			TextureType: mtl.TextureType2D,
+			PixelFormat: mtl.PixelFormatRGBA8UNorm,
+			Width:       size,
+			Height:      size,
+			StorageMode: mtl.StorageModeManaged,
+			Usage:       mtl.TextureUsageShaderRead,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return texture
+	}
+	src, dst := newTexture(), newTexture()
+	defer src.Release()
+	defer dst.Release()
+	pixels := make([]byte, 4*size*size)
+	for i := range pixels {
+		pixels[i] = byte(i)
+	}
+	if err := src.ReplaceRegion(mtl.RegionMake2D(0, 0, size, size), 0, pixels, 4*size); err != nil {
+		t.Fatal(err)
+	}
+	if err := dst.ReplaceRegion(mtl.RegionMake2D(0, 0, size, size), 0, make([]byte, 4*size*size), 4*size); err != nil {
+		t.Fatal(err)
+	}
+
+	cq, err := device.NewCommandQueue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cb, err := cq.CommandBuffer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The 2x2 block at (1, 0) of src goes to (2, 1) of dst.
+	copyBlock := func() {
+		bce, err := cb.BlitCommandEncoder()
+		if err != nil {
+			t.Fatal(err)
+		}
+		bce.CopyFromTexture(src, 0, 0, mtl.Origin{X: 1}, mtl.Size{Width: 2, Height: 2, Depth: 1}, dst, 0, 0, mtl.Origin{X: 2, Y: 1})
+		bce.EndEncoding()
+	}
+	copyBlock()
+	if runtime.GOARCH == "arm64" {
+		if n := testing.AllocsPerRun(10, copyBlock); n != 0 {
+			t.Errorf("allocations: got %v, want 0", n)
+		}
+	}
+	bce, err := cb.BlitCommandEncoder()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bce.Synchronize(dst)
+	bce.EndEncoding()
+	cb.Commit()
+	cb.WaitUntilCompleted()
+
+	got := make([]byte, 4*size*size)
+	if err := dst.GetBytes(got, 4*size, mtl.RegionMake2D(0, 0, size, size), 0); err != nil {
+		t.Fatal(err)
+	}
+	for y := range size {
+		for x := range size {
+			want := []byte{0, 0, 0, 0}
+			if x >= 2 && y >= 1 && y < 3 {
+				i := 4 * ((y-1)*size + x - 1)
+				want = pixels[i : i+4]
+			}
+			if p := got[4*(y*size+x) : 4*(y*size+x)+4]; string(p) != string(want) {
+				t.Errorf("pixel (%d, %d): got %v, want %v", x, y, p, want)
+			}
 		}
 	}
 }

@@ -1063,7 +1063,7 @@ func hasRenderTargetSize(rpd objc.ID) bool {
 //
 // Reference: https://developer.apple.com/documentation/metal/mtlcommandbuffer/1443001-makeblitcommandencoder?language=objc.
 func (cb CommandBuffer) BlitCommandEncoder() (BlitCommandEncoder, error) {
-	ce := cb.commandBuffer.Send(sel_blitCommandEncoder)
+	ce := objc.ID(objcutil.Send(cb.commandBuffer, sel_blitCommandEncoder))
 	if ce == 0 {
 		return BlitCommandEncoder{}, errors.New("mtl: blitCommandEncoder returned nil")
 	}
@@ -1213,8 +1213,36 @@ func (bce BlitCommandEncoder) SynchronizeTexture(texture Texture, slice int, lev
 //
 // Reference: https://developer.apple.com/documentation/metal/mtlblitcommandencoder/1400754-copyfromtexture?language=objc.
 func (bce BlitCommandEncoder) CopyFromTexture(sourceTexture Texture, sourceSlice int, sourceLevel int, sourceOrigin Origin, sourceSize Size, destinationTexture Texture, destinationSlice int, destinationLevel int, destinationOrigin Origin) {
-	bce.commandEncoder.Send(sel_copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin,
-		sourceTexture, sourceSlice, sourceLevel, sourceOrigin, sourceSize, destinationTexture, destinationSlice, destinationLevel, destinationOrigin)
+	if runtime.GOARCH != "arm64" {
+		bce.commandEncoder.Send(sel_copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin,
+			sourceTexture, sourceSlice, sourceLevel, sourceOrigin, sourceSize, destinationTexture, destinationSlice, destinationLevel, destinationOrigin)
+		return
+	}
+
+	// arm64 passes a struct of more than 16 bytes by reference, so the copy needs no allocation: the
+	// structs go to the method as pointers to pinned memory.
+	a := copyArgsPool.Get().(*copyArgs)
+	a.sourceOrigin, a.sourceSize, a.destinationOrigin = sourceOrigin, sourceSize, destinationOrigin
+	a.pinner.Pin(a)
+	objcutil.Send(bce.commandEncoder, sel_copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin,
+		uintptr(sourceTexture.texture), uintptr(sourceSlice), uintptr(sourceLevel), uintptr(unsafe.Pointer(&a.sourceOrigin)), uintptr(unsafe.Pointer(&a.sourceSize)),
+		uintptr(destinationTexture.texture), uintptr(destinationSlice), uintptr(destinationLevel), uintptr(unsafe.Pointer(&a.destinationOrigin)))
+	a.pinner.Unpin()
+	copyArgsPool.Put(a)
+}
+
+// copyArgs holds the struct arguments of CopyFromTexture on arm64.
+type copyArgs struct {
+	sourceOrigin      Origin
+	sourceSize        Size
+	destinationOrigin Origin
+	pinner            runtime.Pinner
+}
+
+var copyArgsPool = sync.Pool{
+	New: func() any {
+		return &copyArgs{}
+	},
 }
 
 // Library is a collection of compiled graphics or compute functions.
