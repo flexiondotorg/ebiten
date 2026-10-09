@@ -384,6 +384,13 @@ type platformLibraryContextState struct {
 		SwapIntervalEXT         func(display uintptr, drawable _XID, interval int32)
 		SwapIntervalMESA        func(interval int32) int32
 		CreateContextAttribsARB func(display uintptr, config uintptr, share uintptr, direct bool, attribs *int32) uintptr
+
+		// swapBuffers and the swapInterval procs are called in each frame, through swapBuffersGLX
+		// and swapIntervalGLX without allocations.
+		swapBuffers      uintptr
+		swapIntervalSGI  uintptr
+		swapIntervalEXT  uintptr
+		swapIntervalMESA uintptr
 	}
 	egl struct {
 		major, minor int32
