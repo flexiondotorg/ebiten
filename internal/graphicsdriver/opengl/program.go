@@ -432,6 +432,23 @@ loop:
 		idx++
 	}
 
+	// A sampler of a slot without an image would sample the texture that an earlier draw left on its unit, which can be
+	// the destination: a feedback loop, which WebGL 2 rejects. Point such samplers at the empty texture on a free unit.
+	// With a slot without an image, the images take at most ShaderSrcImageCount-1 units.
+	var emptyBound bool
+	for i, t := range textures {
+		if t.valid || g.context.locationCache.GetUniformLocation(&g.context, program, textureVariableNames[i]) == invalidUniform {
+			continue
+		}
+		if !emptyBound {
+			if err := g.context.bindEmptyTextureToUnit(idx); err != nil {
+				return err
+			}
+			emptyBound = true
+		}
+		g.setSampler(program, i, idx)
+	}
+
 	for i := range g.activatedTextures {
 		g.activatedTextures[i] = activatedTexture{}
 	}

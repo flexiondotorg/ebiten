@@ -697,6 +697,43 @@ func TestMeshDepthDiscard(t *testing.T) {
 	})
 }
 
+// sumShaderSource adds the colors of sources 0 and 1.
+const sumShaderSource = `//kage:unit pixels
+
+package main
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+	return imageSrc0UnsafeAt(srcPos) + imageSrc1UnsafeAtFromSrc0Pos(srcPos)
+}
+`
+
+// TestEmptySourceSlot checks that a slot without an image reads transparent black, after an earlier draw of the same
+// shader had the destination of this draw in that slot.
+func TestEmptySourceSlot(t *testing.T) {
+	runOnGameUpdate(func() {
+		ss, ok := newShaders(t, sumShaderSource)
+		if !ok {
+			return
+		}
+		newImage := func(clr color.Color) *ebiten.Image {
+			img := ebiten.NewImageWithOptions(image.Rect(0, 0, meshSize, meshSize), &ebiten.NewImageOptions{Unmanaged: true})
+			img.Fill(clr)
+			return img
+		}
+		a, b, c := newImage(green), newImage(red), newImage(color.Transparent)
+
+		op := &ebiten.DrawTrianglesShaderOptions{Blend: ebiten.BlendCopy}
+		op.Images[0] = a
+		op.Images[1] = b
+		drawFull(c, ss[0], op)
+		op.Images[1] = nil
+		drawFull(b, ss[0], op)
+
+		checkPixels(t, c, func(image.Point) color.RGBA { return color.RGBA{R: 0xff, G: 0xff, A: 0xff} })
+		checkPixels(t, b, func(image.Point) color.RGBA { return green })
+	})
+}
+
 // TestMeshAllocations checks that mesh draws with instances and Depth allocate nothing after the first frames.
 func TestMeshAllocations(t *testing.T) {
 	var s *ebiten.Shader
