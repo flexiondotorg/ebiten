@@ -22,6 +22,7 @@ import (
 	"github.com/ebitengine/purego"
 	"github.com/ebitengine/purego/objc"
 
+	"github.com/hajimehoshi/ebiten/v2/internal/cocoa"
 	"github.com/hajimehoshi/ebiten/v2/internal/objcutil"
 )
 
@@ -118,6 +119,53 @@ func TestSendStruct(t *testing.T) {
 
 	if n := testing.AllocsPerRun(100, func() {
 		objcutil.SendStruct(transform, selSetTransformStruct, unsafe.Pointer(&want), unsafe.Sizeof(want))
+	}); n != 0 {
+		t.Errorf("allocations: got %v, want 0", n)
+	}
+}
+
+func TestValueForKey(t *testing.T) {
+	loadFoundation(t)
+	selNew := objc.RegisterName("new")
+	selRelease := objc.RegisterName("release")
+	selSetTransformStruct := objc.RegisterName("setTransformStruct:")
+	selNumberWithDouble := objc.RegisterName("numberWithDouble:")
+
+	pool := cocoa.NSAutoreleasePool_new()
+	defer pool.Release()
+
+	transform := objc.ID(objc.GetClass("NSAffineTransform")).Send(selNew)
+	defer transform.Send(selRelease)
+	want := affineTransformStruct{m11: 1.5, m12: 2.5, m21: 3.5, m22: 4.5, tX: 5.5, tY: 6.5}
+	objcutil.SendStruct(transform, selSetTransformStruct, unsafe.Pointer(&want), unsafe.Sizeof(want))
+
+	keyTransformStruct := cocoa.NSString_alloc().InitWithUTF8String("transformStruct")
+	defer keyTransformStruct.Send(selRelease)
+	var got affineTransformStruct
+	if !objcutil.ValueForKey(transform, keyTransformStruct.ID, unsafe.Pointer(&got), unsafe.Sizeof(got)) {
+		t.Fatal("transformStruct: no value")
+	}
+	if got != want {
+		t.Errorf("transformStruct: got %+v, want %+v", got, want)
+	}
+
+	// A double, the form of the GPU times of a Metal command buffer.
+	number := objc.ID(objc.GetClass("NSNumber")).Send(selNumberWithDouble, 2.75)
+	keyDoubleValue := cocoa.NSString_alloc().InitWithUTF8String("doubleValue")
+	defer keyDoubleValue.Send(selRelease)
+	var d float64
+	if !objcutil.ValueForKey(number, keyDoubleValue.ID, unsafe.Pointer(&d), unsafe.Sizeof(d)) {
+		t.Fatal("doubleValue: no value")
+	}
+	if d != 2.75 {
+		t.Errorf("doubleValue: got %v, want 2.75", d)
+	}
+
+	if n := testing.AllocsPerRun(100, func() {
+		var got affineTransformStruct
+		objcutil.ValueForKey(transform, keyTransformStruct.ID, unsafe.Pointer(&got), unsafe.Sizeof(got))
+		var d float64
+		objcutil.ValueForKey(number, keyDoubleValue.ID, unsafe.Pointer(&d), unsafe.Sizeof(d))
 	}); n != 0 {
 		t.Errorf("allocations: got %v, want 0", n)
 	}

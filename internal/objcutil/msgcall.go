@@ -99,6 +99,30 @@ func callPointer(fn uintptr, a0, a1 uintptr, p unsafe.Pointer, args ...uintptr) 
 	return r
 }
 
+// callOut is like call, with the address of a result area in the call record as the third argument,
+// after a0 and a1. The function writes at most size bytes there, and callOut copies them to out, so
+// that out can be on the stack of the caller.
+func callOut(fn uintptr, a0, a1 uintptr, out unsafe.Pointer, size uintptr, args ...uintptr) uintptr {
+	if size > maxStructSize {
+		panic("objcutil: unsupported result size")
+	}
+	c := msgCallPool.Get().(*msgCall)
+	if 3+len(args) > len(c.args) {
+		panic("objcutil: too many arguments")
+	}
+	clear(c.structArg[:])
+	c.args[0] = a0
+	c.args[1] = a1
+	c.args[2] = uintptr(unsafe.Pointer(&c.structArg))
+	n := 3 + copy(c.args[3:], args)
+	c.pinner.Pin(c)
+	r := c.call(fn, n)
+	c.pinner.Unpin()
+	copy(unsafe.Slice((*byte)(out), size), unsafe.Slice((*byte)(unsafe.Pointer(&c.structArg)), size))
+	msgCallPool.Put(c)
+	return r
+}
+
 // callStruct is like call, with a struct argument by value after the integer arguments a0, a1,
 // and args. The struct must be the last argument. It is size bytes at s, and it must be larger
 // than 16 bytes and a multiple of 8 bytes, so that the platform passes it in memory: by reference

@@ -84,6 +84,29 @@ func TestCallPointer(t *testing.T) {
 	}
 }
 
+func TestCallOut(t *testing.T) {
+	inetNtop := libc(t, "inet_ntop")
+	const afInet = 2
+	src := []byte{192, 168, 10, 200}
+	var p runtime.Pinner
+	p.Pin(&src[0])
+	defer p.Unpin()
+
+	var out [16]byte
+	if r := callOut(inetNtop, afInet, uintptr(unsafe.Pointer(&src[0])), unsafe.Pointer(&out), uintptr(len(out)), uintptr(len(out))); r == 0 {
+		t.Fatal("inet_ntop failed")
+	}
+	if got, want := goString(out[:]), "192.168.10.200"; got != want {
+		t.Errorf("inet_ntop: got %q, want %q", got, want)
+	}
+	if n := testing.AllocsPerRun(100, func() {
+		var out [16]byte
+		callOut(inetNtop, afInet, uintptr(unsafe.Pointer(&src[0])), unsafe.Pointer(&out), uintptr(len(out)), uintptr(len(out)))
+	}); n != 0 {
+		t.Errorf("allocations: got %v, want 0", n)
+	}
+}
+
 func TestCallTooManyArguments(t *testing.T) {
 	defer func() {
 		if recover() == nil {

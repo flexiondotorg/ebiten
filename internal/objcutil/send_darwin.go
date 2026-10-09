@@ -54,6 +54,35 @@ func SendPointer(id objc.ID, sel objc.SEL, p unsafe.Pointer, args ...uintptr) ui
 	return callPointer(msgSend, uintptr(id), uintptr(sel), p, args...)
 }
 
+// SendOut is like Send, with a pointer to a result area of size bytes as the first argument after
+// the selector. The method writes its result there, and SendOut copies it to out, so that out can be
+// on the stack. size must be at most 64 bytes.
+func SendOut(id objc.ID, sel objc.SEL, out unsafe.Pointer, size uintptr, args ...uintptr) uintptr {
+	return callOut(msgSend, uintptr(id), uintptr(sel), out, size, args...)
+}
+
+var (
+	sel_valueForKey  = objc.RegisterName("valueForKey:")
+	sel_getValueSize = objc.RegisterName("getValue:size:")
+)
+
+// ValueForKey reads the value of the key, an NSString, from id with key-value coding, and copies
+// the size bytes of the NSValue or NSNumber that it returns to out. It reports whether the value
+// is not nil.
+//
+// ValueForKey is for a method that returns a floating-point value or a struct of them, for example
+// a double, NSPoint, or NSRect, which Send cannot return. Key-value coding wraps such a result in
+// an autoreleased NSValue or NSNumber, so call ValueForKey inside an autorelease pool. size must be
+// the size of the value's type.
+func ValueForKey(id objc.ID, key objc.ID, out unsafe.Pointer, size uintptr) bool {
+	v := objc.ID(Send(id, sel_valueForKey, uintptr(key)))
+	if v == 0 {
+		return false
+	}
+	SendOut(v, sel_getValueSize, out, size, size)
+	return true
+}
+
 // SendStruct is like Send, with one argument: a struct by value, size bytes at s. The struct must
 // be larger than 16 bytes and a multiple of 8 bytes, for example MTLViewport or MTLScissorRect.
 // Such a struct travels in memory on arm64 and amd64, so floating-point fields work, apart from
