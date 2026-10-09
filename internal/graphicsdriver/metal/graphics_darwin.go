@@ -18,6 +18,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"image"
 	"log/slog"
 	"math"
 	"runtime"
@@ -92,6 +93,9 @@ type Graphics struct {
 	maxImageSize int
 	tmpBuffers   []mtl.Buffer
 	tmpUniforms  []uint32
+
+	// emptyTexture is a transparent 1x1 texture for a source slot without an image.
+	emptyTexture mtl.Texture
 
 	// residencySet holds the textures and the buffers to keep resident in GPU memory.
 	// residencySet is zero if residency sets are not available.
@@ -655,6 +659,16 @@ func (g *Graphics) flushRenderCommandEncoderIfNeeded() {
 }
 
 func (g *Graphics) draw(dst *Image, dstRegions []graphicsdriver.DstRegion, srcs [graphics.ShaderSrcImageCount]*Image, indexOffset int, shader *Shader, uniforms []uint32, blend graphicsdriver.Blend) error {
+	// Writing the pixels of the empty texture ends a render pass, so make it before the render pass opens.
+	for i, src := range srcs {
+		if src == nil && i < shader.ir.TextureCount {
+			if err := g.ensureEmptyTexture(); err != nil {
+				return err
+			}
+			break
+		}
+	}
+
 	// In order to create a separate command buffer for the screen, flush the current command buffer.
 	// This is because a drawable is not released as long as the CommandBuffer referencing it is alive, so
 	// it is more efficient to separate CommandBuffers that use the drawable from those that do not.
@@ -734,6 +748,9 @@ func (g *Graphics) draw(dst *Image, dstRegions []graphicsdriver.DstRegion, srcs 
 	for i, src := range srcs {
 		if src != nil {
 			g.rce.SetFragmentTexture(src.texture, i)
+		} else if i < shader.ir.TextureCount {
+			// A texture argument that the shader declares needs a binding, or the Metal validation layer reports it.
+			g.rce.SetFragmentTexture(g.emptyTexture, i)
 		} else {
 			g.rce.SetFragmentTexture(mtl.Texture{}, i)
 		}
@@ -1129,4 +1146,30 @@ func uniformAlignment(t shaderir.Type) int {
 		return 4
 	}
 	return 1
+}
+
+// ensureEmptyTexture makes the empty texture at its first use.
+func (g *Graphics) ensureEmptyTexture() error {
+	if g.emptyTexture != (mtl.Texture{}) {
+		return nil
+	}
+	t, err := g.view.getMTLDevice().NewTextureWithDescriptor(mtl.TextureDescriptor{
+		TextureType: mtl.TextureType2D,
+		PixelFormat: mtl.PixelFormatRGBA8UNorm,
+		Width:       1,
+		Height:      1,
+		StorageMode: storageMode,
+		Usage:       mtl.TextureUsageShaderRead,
+	})
+	if err != nil {
+		return fmt.Errorf("metal: device.NewTextureWithDescriptor failed: %w", err)
+	}
+	// The contents of a new texture are undefined.
+	if err := (&Image{graphics: g, texture: t}).WritePixels([]graphicsdriver.PixelsArgs{{Pixels: make([]byte, 4), Region: image.Rect(0, 0, 1, 1)}}); err != nil {
+		t.Release()
+		return err
+	}
+	g.addResidentResource(t)
+	g.emptyTexture = t
+	return nil
 }
