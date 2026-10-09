@@ -450,6 +450,20 @@ func checkSourceDepth(srcs [graphics.ShaderSrcImageCount]*Image, blend graphicsd
 	}
 }
 
+// tmpVertices holds the vertices that drawTriangles moves into the backend, so that the caller's vertices stay as they are.
+// backendsM guards it.
+var tmpVertices []float32
+
+// copyVertices copies vertices into tmpVertices, and returns the copy.
+func copyVertices(vertices []float32) []float32 {
+	if cap(tmpVertices) < len(vertices) {
+		tmpVertices = make([]float32, len(vertices))
+	}
+	vs := tmpVertices[:len(vertices)]
+	copy(vs, vertices)
+	return vs
+}
+
 func (i *Image) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32) {
 	backends := make([]*backend, 0, len(srcs))
 	for _, src := range srcs {
@@ -490,6 +504,7 @@ func (i *Image) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 		oxf, oyf = float32(r.Min.X), float32(r.Min.Y)
 		// Adding zero offsets changes no position, so skip the loop.
 		if dx != 0 || dy != 0 || oxf != 0 || oyf != 0 {
+			vertices = copyVertices(vertices)
 			n := len(vertices)
 			for i := 0; i < n; i += graphics.VertexFloatCount {
 				vertices[i] += dx
@@ -499,6 +514,7 @@ func (i *Image) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 			}
 		}
 	} else if dx != 0 || dy != 0 {
+		vertices = copyVertices(vertices)
 		n := len(vertices)
 		for i := 0; i < n; i += graphics.VertexFloatCount {
 			vertices[i] += dx

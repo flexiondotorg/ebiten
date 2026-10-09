@@ -19,6 +19,7 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"slices"
 	"sync"
 	"testing"
 
@@ -3473,5 +3474,54 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
 				}
 			}
 		}
+	}
+}
+
+// DrawTrianglesShader must not change the caller's vertices, also when it passes them on without a copy.
+func TestShaderDrawTrianglesKeepsVertices(t *testing.T) {
+	s, err := ebiten.NewShader([]byte(`//kage:unit pixels
+
+package main
+
+func Fragment(dstPos vec4, src0Pos vec2, color vec4) vec4 {
+	return imageSrc0At(src0Pos)
+}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Several small images put the later ones away from the origin of their atlas.
+	var imgs []*ebiten.Image
+	for range 8 {
+		img := ebiten.NewImage(16, 16)
+		img.Fill(color.White)
+		imgs = append(imgs, img)
+	}
+	big := ebiten.NewImage(64, 64)
+
+	for _, tc := range []struct {
+		name     string
+		dst, src *ebiten.Image
+	}{
+		{"atlas", imgs[5], imgs[6]},
+		{"sub-image destination", big.SubImage(image.Rect(8, 8, 40, 40)).(*ebiten.Image), imgs[7]},
+		{"sub-image source", big, imgs[4].SubImage(image.Rect(4, 4, 12, 12)).(*ebiten.Image)},
+		{"no source", imgs[3], nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			vs := []ebiten.Vertex{
+				{DstX: 8, DstY: 8, SrcX: 4, SrcY: 4, ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
+				{DstX: 16, DstY: 8, SrcX: 12, SrcY: 4, ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
+				{DstX: 8, DstY: 16, SrcX: 4, SrcY: 12, ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
+			}
+			want := slices.Clone(vs)
+			op := &ebiten.DrawTrianglesShaderOptions{}
+			op.Images[0] = tc.src
+			tc.dst.DrawTrianglesShader(vs, []uint16{0, 1, 2}, s, op)
+			if !slices.Equal(vs, want) {
+				t.Errorf("vertices: got %v, want %v", vs, want)
+			}
+		})
 	}
 }
