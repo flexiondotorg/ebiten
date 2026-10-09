@@ -588,8 +588,6 @@ var (
 	sel_getBytes_bytesPerRow_fromRegion_mipmapLevel                                                                                   = objc.RegisterName("getBytes:bytesPerRow:fromRegion:mipmapLevel:")
 	sel_setRenderTargetWidth                                                                                                          = objc.RegisterName("setRenderTargetWidth:")
 	sel_setRenderTargetHeight                                                                                                         = objc.RegisterName("setRenderTargetHeight:")
-	sel_GPUStartTime                                                                                                                  = objc.RegisterName("GPUStartTime")
-	sel_GPUEndTime                                                                                                                    = objc.RegisterName("GPUEndTime")
 	sel_respondsToSelector                                                                                                            = objc.RegisterName("respondsToSelector:")
 )
 
@@ -884,35 +882,33 @@ func (cb CommandBuffer) Status() CommandBufferStatus {
 }
 
 var (
-	// msgSendFloat64 sends a message without arguments that returns a double. objc.ID.Send cannot
-	// return a double, and objc.Send registers a function at every call.
-	msgSendFloat64     func(id objc.ID, sel objc.SEL) float64
-	msgSendFloat64Once sync.Once
+	// The keys of the GPU times for key-value coding, which returns a double as an NSNumber.
+	// objcutil.Send cannot return a double, and a function that purego registers allocates at
+	// each call.
+	key_GPUStartTime = cocoa.NSString_alloc().InitWithUTF8String("GPUStartTime")
+	key_GPUEndTime   = cocoa.NSString_alloc().InitWithUTF8String("GPUEndTime")
 )
 
-func sendFloat64(id objc.ID, sel objc.SEL) float64 {
-	msgSendFloat64Once.Do(func() {
-		lib, err := purego.Dlopen("/usr/lib/libobjc.A.dylib", purego.RTLD_GLOBAL|purego.RTLD_NOW)
-		if err != nil {
-			panic(fmt.Sprintf("mtl: dlopen libobjc failed: %v", err))
-		}
-		purego.RegisterLibFunc(&msgSendFloat64, lib, "objc_msgSend")
-	})
-	return msgSendFloat64(id, sel)
+func valueFloat64(id objc.ID, key cocoa.NSString) float64 {
+	var v float64
+	objcutil.ValueForKey(id, key.ID, unsafe.Pointer(&v), unsafe.Sizeof(v))
+	return v
 }
 
 // GPUStartTime returns the host time in seconds when the GPU starts to run the command buffer.
+// Call it inside an autorelease pool.
 //
 // Reference: https://developer.apple.com/documentation/metal/mtlcommandbuffer/gpustarttime?language=objc.
 func (cb CommandBuffer) GPUStartTime() float64 {
-	return sendFloat64(cb.commandBuffer, sel_GPUStartTime)
+	return valueFloat64(cb.commandBuffer, key_GPUStartTime)
 }
 
 // GPUEndTime returns the host time in seconds when the GPU ends the command buffer.
+// Call it inside an autorelease pool.
 //
 // Reference: https://developer.apple.com/documentation/metal/mtlcommandbuffer/gpuendtime?language=objc.
 func (cb CommandBuffer) GPUEndTime() float64 {
-	return sendFloat64(cb.commandBuffer, sel_GPUEndTime)
+	return valueFloat64(cb.commandBuffer, key_GPUEndTime)
 }
 
 // PresentDrawable registers a drawable presentation to occur as soon as possible.

@@ -256,6 +256,11 @@ loop:
 
 	// The GPU timing takes the command buffers in the order of the queue.
 	slices.Sort(g.doneFrames)
+	if len(g.doneFrames) > 0 && g.timings.On() {
+		// The GPU times come as autoreleased objects.
+		pool := cocoa.NSAutoreleasePool_new()
+		defer pool.Release()
+	}
 	for _, frame := range g.doneFrames {
 		cbs := g.frameToCB[frame]
 		g.passTimes.complete(frame)
