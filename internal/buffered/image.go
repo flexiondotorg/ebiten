@@ -80,8 +80,8 @@ func (i *Image) WritePixels(pix []byte, region image.Rectangle) {
 //
 // Copying vertices and indices is the caller's responsibility.
 func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *atlas.Shader, uniforms []uint32) {
-	for _, src := range srcs {
-		if i == src {
+	for k, src := range srcs {
+		if i == src && !blend.IsDepthSelfRead(k, blend.DepthTest) {
 			panic("buffered: Image.DrawTriangles: source images must be different from the receiver")
 		}
 		if src != nil {
@@ -111,7 +111,7 @@ func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 func (i *Image) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Image, mesh *graphicscommand.Mesh, instances []float32, blend graphicsdriver.Blend, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *atlas.Shader, uniforms []uint32, depth bool) {
 	var imgs [graphics.ShaderSrcImageCount]*atlas.Image
 	for j, src := range srcs {
-		if i == src {
+		if i == src && !blend.IsDepthSelfRead(j, depth) {
 			panic("buffered: Image.DrawMesh: source images must be different from the receiver")
 		}
 		if src != nil {

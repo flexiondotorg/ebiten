@@ -236,11 +236,11 @@ func (g *Graphics) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphics.
 		g.beginPass(destination, blend.DepthTest)
 	}
 	if blend.DepthTest {
-		if err := destination.useDepth(); err != nil {
+		if err := destination.useDepth(!blend.DepthReadOnly); err != nil {
 			return err
 		}
 	}
-	g.setDepthTest(blend.DepthTest)
+	g.setDepthTest(blend.DepthTest, blend.DepthReadOnly)
 
 	for _, dstRegion := range dstRegions {
 		g.context.ctx.Scissor(
@@ -307,10 +307,19 @@ func (g *Graphics) useDestinationAndProgram(dstID graphicsdriver.ImageID, srcIDs
 			continue
 		}
 		imgs[i].valid = true
-		imgs[i].native = g.images[srcID].texture
-	}
-	if blend.SourceDepth {
-		imgs[0].native = g.images[srcIDs[0]].depthTexture
+		src := g.images[srcID]
+		switch {
+		case !blend.DepthSources[i]:
+			imgs[i].native = src.texture
+		case src == destination:
+			t, err := destination.useDepthShadow()
+			if err != nil {
+				return nil, err
+			}
+			imgs[i].native = t
+		default:
+			imgs[i].native = src.depthTexture
+		}
 	}
 
 	if err := g.useProgram(program, g.uniformVars, imgs); err != nil {

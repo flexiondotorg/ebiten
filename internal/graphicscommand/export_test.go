@@ -58,10 +58,11 @@ func NewDepthDrawForTesting(dst *Image) CommandForTesting {
 	return &drawTrianglesCommand{dst: dst, blend: graphicsdriver.Blend{DepthTest: true}}
 }
 
-// NewDepthReadForTesting returns a triangle draw into dst that reads the depth of src.
-func NewDepthReadForTesting(dst, src *Image) CommandForTesting {
-	c := &drawTrianglesCommand{dst: dst, blend: graphicsdriver.Blend{SourceDepth: true}}
-	c.srcs[0] = src
+// NewDepthReadForTesting returns a triangle draw into dst that reads the depth of src in source k.
+func NewDepthReadForTesting(dst, src *Image, k int) CommandForTesting {
+	c := &drawTrianglesCommand{dst: dst}
+	c.srcs[k] = src
+	c.blend.DepthSources[k] = true
 	return c
 }
 

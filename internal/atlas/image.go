@@ -440,11 +440,13 @@ func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 	i.drawTriangles(srcs, vertices, indices, blend, dstRegion, srcRegions, shader, uniforms)
 }
 
-// checkSourceDepth panics when a draw reads the depth of source 0 and source 0 is not an unmanaged image.
+// checkSourceDepth panics when a draw reads the depth of a source that is not an unmanaged image.
 // An unmanaged image is never on an atlas, so the depth buffer of its backend is its own.
 func checkSourceDepth(srcs [graphics.ShaderSrcImageCount]*Image, blend graphicsdriver.Blend) {
-	if blend.SourceDepth && (srcs[0] == nil || srcs[0].imageType != ImageTypeUnmanaged) {
-		panic("atlas: the source of a depth read must be an unmanaged image")
+	for k, on := range blend.DepthSources {
+		if on && (srcs[k] == nil || srcs[k].imageType != ImageTypeUnmanaged) {
+			panic("atlas: the source of a depth read must be an unmanaged image")
+		}
 	}
 }
 
@@ -465,10 +467,10 @@ func (i *Image) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 
 	i.ensureIsolatedFromSource(backends)
 
-	for _, src := range srcs {
+	for k, src := range srcs {
 		// Compare i and source images after ensuring i is not on an atlas, or
 		// i and a source image might share the same atlas even though i != src.
-		if src != nil && i.backend.backendImage == src.backend.backendImage {
+		if src != nil && i.backend.backendImage == src.backend.backendImage && !blend.IsDepthSelfRead(k, blend.DepthTest) {
 			panic("atlas: Image.DrawTriangles: source must be different from the receiver")
 		}
 	}
@@ -569,7 +571,7 @@ func (i *Image) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Image, mesh *graphi
 		if src == nil {
 			continue
 		}
-		if i.backend.backendImage == src.backend.backendImage {
+		if i.backend.backendImage == src.backend.backendImage && !blend.IsDepthSelfRead(j, depth) {
 			panic("atlas: Image.DrawMesh: source must be different from the receiver")
 		}
 		if !srcRegions[j].Empty() {

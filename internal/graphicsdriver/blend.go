@@ -14,6 +14,10 @@
 
 package graphicsdriver
 
+import (
+	"github.com/hajimehoshi/ebiten/v2/internal/graphics"
+)
+
 type Blend struct {
 	BlendFactorSourceRGB        BlendFactor
 	BlendFactorSourceAlpha      BlendFactor
@@ -26,8 +30,18 @@ type Blend struct {
 	// buffer of the destination, and writes its depth, as the depth of a mesh draw does.
 	DepthTest bool
 
-	// SourceDepth binds the depth buffer of source 0 in place of its color, on a DepthSourcer.
-	SourceDepth bool
+	// DepthReadOnly keeps the depth test of a triangle draw or a mesh draw, but writes no depth.
+	DepthReadOnly bool
+
+	// DepthSources binds the depth buffer of each marked source in place of its color, on a DepthSourcer.
+	// A source can be the destination when the draw writes no depth.
+	DepthSources [graphics.ShaderSrcImageCount]bool
+}
+
+// IsDepthSelfRead reports whether source k of a draw can be its destination: the draw reads the depth of source k,
+// and writes no depth. depth reports whether the draw tests the depth.
+func (b Blend) IsDepthSelfRead(k int, depth bool) bool {
+	return b.DepthSources[k] && (!depth || b.DepthReadOnly)
 }
 
 // BlendFactor and BlendOperation must be synced with internal/graphicsdriver/playstation5/graphics_playstation5.h.

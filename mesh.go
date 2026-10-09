@@ -59,7 +59,7 @@ func IsMeshDrawingSupported() bool {
 }
 
 // IsDepthSourceSupported reports whether a draw can read the depth buffer of an image with
-// DrawTrianglesShaderOptions.SourceDepth. It is true on OpenGL, OpenGL ES, and WebGL 2. Call it
+// DrawTrianglesShaderOptions.ImageDepth. It is true on OpenGL, OpenGL ES, and WebGL 2. Call it
 // after the game starts.
 func IsDepthSourceSupported() bool {
 	return ui.Get().IsDepthSourceSupported()
