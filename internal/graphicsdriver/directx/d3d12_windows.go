@@ -339,6 +339,7 @@ const (
 	_D3D12_RESOURCE_STATE_INDEX_BUFFER               _D3D12_RESOURCE_STATES = 0x2
 	_D3D12_RESOURCE_STATE_RENDER_TARGET              _D3D12_RESOURCE_STATES = 0x4
 	_D3D12_RESOURCE_STATE_DEPTH_WRITE                _D3D12_RESOURCE_STATES = 0x10
+	_D3D12_RESOURCE_STATE_DEPTH_READ                 _D3D12_RESOURCE_STATES = 0x20
 	_D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE  _D3D12_RESOURCE_STATES = 0x40
 	_D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE      _D3D12_RESOURCE_STATES = 0x80
 	_D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT          _D3D12_RESOURCE_STATES = 0x200
@@ -1525,9 +1526,6 @@ func (i *_ID3D12Device) CreateDescriptorHeap(desc *_D3D12_DESCRIPTOR_HEAP_DESC) 
 }
 
 func (i *_ID3D12Device) CreateDepthStencilView(pResource *_ID3D12Resource, pDesc *_D3D12_DEPTH_STENCIL_VIEW_DESC, destDescriptor _D3D12_CPU_DESCRIPTOR_HANDLE) {
-	if pDesc != nil {
-		panic("directx: D3D12_DEPTH_STENCIL_VIEW_DESC with a non-nil desc is not implemented")
-	}
 	_, _, _ = syscall.Syscall6(i.vtbl.CreateDepthStencilView, 4, uintptr(unsafe.Pointer(i)),
 		uintptr(unsafe.Pointer(pResource)), uintptr(unsafe.Pointer(pDesc)), destDescriptor.ptr,
 		0, 0)

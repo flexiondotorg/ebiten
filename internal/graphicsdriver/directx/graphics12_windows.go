@@ -1307,7 +1307,7 @@ func (g *graphics12) DrawTriangles(dstID graphicsdriver.ImageID, srcs [graphics.
 	}
 
 	// The depth test of a triangle draw is untested.
-	dst, srcImages, err := g.beginDraw(dstID, srcs, blend.DepthTest)
+	dst, srcImages, err := g.beginDraw(dstID, srcs, blend, blend.DepthTest)
 	if err != nil {
 		return err
 	}
@@ -1338,7 +1338,11 @@ func (g *graphics12) DrawTriangles(dstID graphicsdriver.ImageID, srcs [graphics.
 // beginDraw moves dst and the source images to their states, and sets dst as the render target, the
 // viewport, and the topology for a draw. With depth, it also gives dst a depth buffer, which it clears
 // at the first depth draw of each frame.
-func (g *graphics12) beginDraw(dstID graphicsdriver.ImageID, srcs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, depth bool) (*image12, [graphics.ShaderSrcImageCount]*image12, error) {
+//
+// The depth buffer of dst is in DEPTH_WRITE for a draw that writes the depth, and in DEPTH_READ and
+// PIXEL_SHADER_RESOURCE with the read-only view for a draw with Blend.DepthReadOnly, so that the draw can
+// read it too. The depth buffer of a source of Blend.DepthSources is in PIXEL_SHADER_RESOURCE.
+func (g *graphics12) beginDraw(dstID graphicsdriver.ImageID, srcs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, blend graphicsdriver.Blend, depth bool) (*image12, [graphics.ShaderSrcImageCount]*image12, error) {
 	var srcImages [graphics.ShaderSrcImageCount]*image12
 
 	if err := g.flushCommandList(g.copyCommandList); err != nil {
@@ -1355,9 +1359,38 @@ func (g *graphics12) beginDraw(dstID graphicsdriver.ImageID, srcs [graphics.Shad
 	}
 
 	dst := g.images[dstID]
+	var pdsv *_D3D12_CPU_DESCRIPTOR_HANDLE
+	if depth {
+		needsClear := dst.dsvDescriptorHeap == nil || dst.depthFrame != g.frame
+		if err := dst.ensureDepthStencilView(g.device); err != nil {
+			return nil, srcImages, err
+		}
+		if needsClear {
+			// A clear needs the depth buffer in DEPTH_WRITE.
+			if rb, ok := dst.transiteDepthState(_D3D12_RESOURCE_STATE_DEPTH_WRITE); ok {
+				g.drawCommandList.ResourceBarrier([]_D3D12_RESOURCE_BARRIER_Transition{rb})
+			}
+			g.drawCommandList.ClearDepthStencilView(dst.dsv, _D3D12_CLEAR_FLAG_DEPTH, 1, 0, nil)
+			dst.depthFrame = g.frame
+		}
+		pdsv = &dst.dsv
+		if blend.DepthReadOnly {
+			pdsv = &dst.dsvReadOnly
+		}
+	}
+
 	var resourceBarriers []_D3D12_RESOURCE_BARRIER_Transition
 	if rb, ok := dst.transiteState(_D3D12_RESOURCE_STATE_RENDER_TARGET); ok {
 		resourceBarriers = append(resourceBarriers, rb)
+	}
+	if depth {
+		state := _D3D12_RESOURCE_STATE_DEPTH_WRITE
+		if blend.DepthReadOnly {
+			state = _D3D12_RESOURCE_STATE_DEPTH_READ | _D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
+		}
+		if rb, ok := dst.transiteDepthState(state); ok {
+			resourceBarriers = append(resourceBarriers, rb)
+		}
 	}
 
 	for i, srcID := range srcs {
@@ -1366,27 +1399,23 @@ func (g *graphics12) beginDraw(dstID graphicsdriver.ImageID, srcs [graphics.Shad
 			continue
 		}
 		srcImages[i] = src
-		if rb, ok := src.transiteState(_D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE); ok {
+		if !blend.DepthSources[i] {
+			if rb, ok := src.transiteState(_D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE); ok {
+				resourceBarriers = append(resourceBarriers, rb)
+			}
+			continue
+		}
+		// The depth buffer of dst is already readable in a read-only depth draw.
+		if src.depthTexture == nil || src.depthState&_D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE != 0 {
+			continue
+		}
+		if rb, ok := src.transiteDepthState(_D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE); ok {
 			resourceBarriers = append(resourceBarriers, rb)
 		}
 	}
 
 	if len(resourceBarriers) > 0 {
 		g.drawCommandList.ResourceBarrier(resourceBarriers)
-	}
-
-	var pdsv *_D3D12_CPU_DESCRIPTOR_HANDLE
-	if depth {
-		needsClear := dst.dsvDescriptorHeap == nil || dst.depthFrame != g.frame
-		dsv, err := dst.ensureDepthStencilView(g.device)
-		if err != nil {
-			return nil, srcImages, err
-		}
-		if needsClear {
-			g.drawCommandList.ClearDepthStencilView(dsv, _D3D12_CLEAR_FLAG_DEPTH, 1, 0, nil)
-			dst.depthFrame = g.frame
-		}
-		pdsv = &dsv
 	}
 
 	if err := dst.setAsRenderTarget(g.drawCommandList, g.device, pdsv); err != nil {
@@ -1408,6 +1437,12 @@ func (g *graphics12) beginDraw(dstID graphicsdriver.ImageID, srcs [graphics.Shad
 	g.drawCommandList.IASetPrimitiveTopology(_D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST)
 
 	return dst, srcImages, nil
+}
+
+// CanReadDepth implements graphicsdriver.DepthSourcer. Direct3D 12 has read-only depth-stencil views at
+// every feature level that it supports.
+func (g *graphics12) CanReadDepth() bool {
+	return true
 }
 
 // mesh12 is a mesh on the GPU. It is untested.
@@ -1453,7 +1488,7 @@ func (g *graphics12) DrawMesh(dstID graphicsdriver.ImageID, srcs [graphics.Shade
 		return err
 	}
 
-	dst, srcImages, err := g.beginDraw(dstID, srcs, depth)
+	dst, srcImages, err := g.beginDraw(dstID, srcs, blend, depth)
 	if err != nil {
 		return err
 	}
@@ -1479,7 +1514,7 @@ func (g *graphics12) DrawMesh(dstID graphicsdriver.ImageID, srcs [graphics.Shade
 
 	shader := g.shaders[shaderID]
 	g.tmpUniforms = appendAdjustedUniforms(g.tmpUniforms[:0], shader.uniformTypes, shader.uniformOffsets, uniforms)
-	if err := g.pipelineStates.bindShaderResources(g.device, g.drawCommandList, g.frameIndex, srcImages, g.tmpUniforms); err != nil {
+	if err := g.pipelineStates.bindShaderResources(g.device, g.drawCommandList, g.frameIndex, srcImages, blend.DepthSources, g.tmpUniforms); err != nil {
 		return err
 	}
 	s, err := shader.pipelineState(blend, dst.screen, depth)

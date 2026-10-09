@@ -199,7 +199,7 @@ func (p *pipelineStates) release() {
 }
 
 func (p *pipelineStates) drawTriangles(device *_ID3D12Device, commandList *_ID3D12GraphicsCommandList, frameIndex int, screen bool, srcs [graphics.ShaderSrcImageCount]*image12, shader *shader12, dstRegions []graphicsdriver.DstRegion, uniforms []uint32, blend graphicsdriver.Blend, indexOffset int) error {
-	if err := p.bindShaderResources(device, commandList, frameIndex, srcs, uniforms); err != nil {
+	if err := p.bindShaderResources(device, commandList, frameIndex, srcs, blend.DepthSources, uniforms); err != nil {
 		return err
 	}
 
@@ -226,8 +226,9 @@ func (p *pipelineStates) drawTriangles(device *_ID3D12Device, commandList *_ID3D
 }
 
 // bindShaderResources writes the uniforms into a new constant buffer, makes the views of the constant
-// buffer and the source images, and binds them with the root signature.
-func (p *pipelineStates) bindShaderResources(device *_ID3D12Device, commandList *_ID3D12GraphicsCommandList, frameIndex int, srcs [graphics.ShaderSrcImageCount]*image12, uniforms []uint32) error {
+// buffer and the source images, and binds them with the root signature. Source i reads the depth buffer
+// of srcs[i] for a true depthSources[i].
+func (p *pipelineStates) bindShaderResources(device *_ID3D12Device, commandList *_ID3D12GraphicsCommandList, frameIndex int, srcs [graphics.ShaderSrcImageCount]*image12, depthSources [graphics.ShaderSrcImageCount]bool, uniforms []uint32) error {
 	idx := len(p.constantBuffers[frameIndex])
 	if idx >= numDescriptorsPerFrame {
 		return fmt.Errorf("directx: too many constant buffers")
@@ -293,9 +294,21 @@ func (p *pipelineStates) bindShaderResources(device *_ID3D12Device, commandList 
 	}
 	offset := int32(numConstantBufferAndSourceTextures * (frameIndex*numDescriptorsPerFrame + idx))
 	h.Offset(offset, p.shaderDescriptorSize)
-	for _, src := range srcs {
+	for i, src := range srcs {
 		h.Offset(1, p.shaderDescriptorSize)
 		if src == nil {
+			continue
+		}
+		if depthSources[i] {
+			// A read of an R32_FLOAT view returns (depth, 0, 0, 1).
+			device.CreateShaderResourceView(src.depthTexture, &_D3D12_SHADER_RESOURCE_VIEW_DESC{
+				Format:                  _DXGI_FORMAT_R32_FLOAT,
+				ViewDimension:           _D3D12_SRV_DIMENSION_TEXTURE2D,
+				Shader4ComponentMapping: _D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+				Texture2D: _D3D12_TEX2D_SRV{
+					MipLevels: 1,
+				},
+			}, h)
 			continue
 		}
 		device.CreateShaderResourceView(src.resource(), &_D3D12_SHADER_RESOURCE_VIEW_DESC{
@@ -397,7 +410,7 @@ func (p *pipelineStates) ensureRootSignature(device *_ID3D12Device) (*_ID3D12Roo
 }
 
 // newPipelineState makes a pipeline state. With mesh, it takes the input layout of a mesh draw, and with depth,
-// the depth test and the depth writes, which are untested.
+// the depth test and the depth writes, which are untested. Blend.DepthReadOnly turns the depth writes off.
 func (p *pipelineStates) newPipelineState(device *_ID3D12Device, vsh, psh *_ID3DBlob, blend graphicsdriver.Blend, screen bool, mesh bool, depth bool) (*_ID3D12PipelineState, error) {
 	rootSignature, err := p.ensureRootSignature(device)
 	if err != nil {
@@ -482,16 +495,20 @@ func (p *pipelineStates) newPipelineState(device *_ID3D12Device, vsh, psh *_ID3D
 			StencilPassOp:      _D3D12_STENCIL_OP_KEEP,
 			StencilFunc:        _D3D12_COMPARISON_FUNC_ALWAYS,
 		}
+		writeMask := _D3D12_DEPTH_WRITE_MASK_ALL
+		if blend.DepthReadOnly {
+			writeMask = _D3D12_DEPTH_WRITE_MASK_ZERO
+		}
 		psoDesc.DepthStencilState = _D3D12_DEPTH_STENCIL_DESC{
 			DepthEnable:      1,
-			DepthWriteMask:   _D3D12_DEPTH_WRITE_MASK_ALL,
+			DepthWriteMask:   writeMask,
 			DepthFunc:        _D3D12_COMPARISON_FUNC_LESS_EQUAL,
 			StencilReadMask:  0xff,
 			StencilWriteMask: 0xff,
 			FrontFace:        keep,
 			BackFace:         keep,
 		}
-		psoDesc.DSVFormat = _DXGI_FORMAT_D24_UNORM_S8_UINT
+		psoDesc.DSVFormat = _DXGI_FORMAT_D32_FLOAT
 	}
 
 	s, err := device.CreateGraphicsPipelineState(&psoDesc)

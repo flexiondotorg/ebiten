@@ -37,9 +37,14 @@ type image12 struct {
 	uploadingStagingBuffers []*_ID3D12Resource
 
 	// depthTexture and dsvDescriptorHeap are the depth buffer, and depthFrame is the frame in which it was cleared last.
+	// dsv writes the depth, and dsvReadOnly does not, so that a draw can test the depth and read it in a shader too.
+	// depthState is the state of the depth buffer.
 	depthTexture      *_ID3D12Resource
 	dsvDescriptorHeap *_ID3D12DescriptorHeap
 	depthFrame        int64
+	dsv               _D3D12_CPU_DESCRIPTOR_HANDLE
+	dsvReadOnly       _D3D12_CPU_DESCRIPTOR_HANDLE
+	depthState        _D3D12_RESOURCE_STATES
 }
 
 func (i *image12) ID() graphicsdriver.ImageID {
@@ -316,11 +321,13 @@ func (i *image12) setAsRenderTarget(drawCommandList *_ID3D12GraphicsCommandList,
 	return nil
 }
 
-// ensureDepthStencilView makes the depth buffer of i on its first use, and returns its view. The
-// depth buffer stays in the depth-write state. It is untested.
-func (i *image12) ensureDepthStencilView(device *_ID3D12Device) (_D3D12_CPU_DESCRIPTOR_HANDLE, error) {
+// ensureDepthStencilView makes the depth buffer of i and its two views on its first use. It is untested.
+//
+// The resource is typeless, so that the depth-stencil views write it as D32_FLOAT and a shader resource view reads it
+// as R32_FLOAT. The depth has no stencil, as no draw uses one.
+func (i *image12) ensureDepthStencilView(device *_ID3D12Device) error {
 	if i.dsvDescriptorHeap != nil {
-		return i.dsvDescriptorHeap.GetCPUDescriptorHandleForHeapStart()
+		return nil
 	}
 
 	w, h := i.internalSize()
@@ -336,39 +343,69 @@ func (i *image12) ensureDepthStencilView(device *_ID3D12Device) (_D3D12_CPU_DESC
 		Height:           uint32(h),
 		DepthOrArraySize: 1,
 		MipLevels:        1,
-		Format:           _DXGI_FORMAT_D24_UNORM_S8_UINT,
+		Format:           _DXGI_FORMAT_R32_TYPELESS,
 		SampleDesc:       _DXGI_SAMPLE_DESC{Count: 1},
 		Layout:           _D3D12_TEXTURE_LAYOUT_UNKNOWN,
 		Flags:            _D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL,
 	}, _D3D12_RESOURCE_STATE_DEPTH_WRITE, &_D3D12_CLEAR_VALUE{
-		Format: _DXGI_FORMAT_D24_UNORM_S8_UINT,
+		Format: _DXGI_FORMAT_D32_FLOAT,
 		Color:  [4]float32{1}, // The depth of the union D3D12_DEPTH_STENCIL_VALUE.
 	})
 	if err != nil {
-		return _D3D12_CPU_DESCRIPTOR_HANDLE{}, err
+		return err
 	}
 
 	heap, err := device.CreateDescriptorHeap(&_D3D12_DESCRIPTOR_HEAP_DESC{
 		Type:           _D3D12_DESCRIPTOR_HEAP_TYPE_DSV,
-		NumDescriptors: 1,
+		NumDescriptors: 2,
 		Flags:          _D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
 	})
 	if err != nil {
 		t.Release()
-		return _D3D12_CPU_DESCRIPTOR_HANDLE{}, err
+		return err
 	}
 
 	dsv, err := heap.GetCPUDescriptorHandleForHeapStart()
 	if err != nil {
 		heap.Release()
 		t.Release()
-		return _D3D12_CPU_DESCRIPTOR_HANDLE{}, err
+		return err
 	}
-	device.CreateDepthStencilView(t, nil, dsv)
+	desc := _D3D12_DEPTH_STENCIL_VIEW_DESC{
+		Format:        _DXGI_FORMAT_D32_FLOAT,
+		ViewDimension: _D3D12_DSV_DIMENSION_TEXTURE2D,
+	}
+	device.CreateDepthStencilView(t, &desc, dsv)
+	dsvReadOnly := dsv
+	dsvReadOnly.Offset(1, device.GetDescriptorHandleIncrementSize(_D3D12_DESCRIPTOR_HEAP_TYPE_DSV))
+	desc.Flags = _D3D12_DSV_FLAG_READ_ONLY_DEPTH
+	device.CreateDepthStencilView(t, &desc, dsvReadOnly)
 
 	i.depthTexture = t
 	i.dsvDescriptorHeap = heap
-	return dsv, nil
+	i.dsv = dsv
+	i.dsvReadOnly = dsvReadOnly
+	i.depthState = _D3D12_RESOURCE_STATE_DEPTH_WRITE
+	return nil
+}
+
+// transiteDepthState moves the depth buffer to newState, and returns the barrier if it is not there yet.
+func (i *image12) transiteDepthState(newState _D3D12_RESOURCE_STATES) (_D3D12_RESOURCE_BARRIER_Transition, bool) {
+	if i.depthState == newState {
+		return _D3D12_RESOURCE_BARRIER_Transition{}, false
+	}
+	oldState := i.depthState
+	i.depthState = newState
+	return _D3D12_RESOURCE_BARRIER_Transition{
+		Type:  _D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+		Flags: _D3D12_RESOURCE_BARRIER_FLAG_NONE,
+		Transition: _D3D12_RESOURCE_TRANSITION_BARRIER{
+			pResource:   i.depthTexture,
+			Subresource: _D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+			StateBefore: oldState,
+			StateAfter:  newState,
+		},
+	}, true
 }
 
 func (i *image12) ensureRenderTargetView(device *_ID3D12Device) error {
