@@ -17,7 +17,6 @@
 package ui
 
 import (
-	stdcontext "context"
 	"fmt"
 	"math"
 	"runtime"
@@ -70,9 +69,6 @@ func (u *UserInterface) Update() error {
 		return err
 	}
 
-	ctx, cancel := stdcontext.WithCancel(stdcontext.Background())
-	defer cancel()
-
 	// The game loop goroutine exits after reporting an error, so waiting only on renderCh would
 	// block forever if the error arrived after the check above.
 	select {
@@ -80,12 +76,9 @@ func (u *UserInterface) Update() error {
 	case err := <-u.errCh:
 		return err
 	}
-	go func() {
-		<-renderEndCh
-		cancel()
-	}()
 
-	graphicscommand.LoopRenderThread(ctx)
+	// The rendering thread loop ends when update sends to renderEndCh.
+	graphicscommand.LoopRenderThreadUntil(renderEndCh)
 	return nil
 }
 
