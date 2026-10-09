@@ -199,6 +199,12 @@ func (u *UserInterface) IsMeshDrawingSupported() bool {
 	return ok && d.CanDrawMesh()
 }
 
+// IsDepthSourceSupported reports whether the graphics driver can read the depth buffer of a source image.
+func (u *UserInterface) IsDepthSourceSupported() bool {
+	d, ok := u.graphicsDriver.(graphicsdriver.DepthSourcer)
+	return ok && d.CanReadDepth()
+}
+
 func (i *Image) WritePixels(pix []byte, region image.Rectangle) {
 	i.mu.Lock()
 	defer i.mu.Unlock()

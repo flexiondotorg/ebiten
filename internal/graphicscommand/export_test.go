@@ -53,6 +53,22 @@ func (q *commandQueue) PendingResourcesForTesting() (uniforms, finalizers int) {
 
 type CommandForTesting = command
 
+// NewDepthDrawForTesting returns a triangle draw into dst with the depth test.
+func NewDepthDrawForTesting(dst *Image) CommandForTesting {
+	return &drawTrianglesCommand{dst: dst, blend: graphicsdriver.Blend{DepthTest: true}}
+}
+
+// NewDepthReadForTesting returns a triangle draw into dst that reads the depth of src.
+func NewDepthReadForTesting(dst, src *Image) CommandForTesting {
+	c := &drawTrianglesCommand{dst: dst, blend: graphicsdriver.Blend{SourceDepth: true}}
+	c.srcs[0] = src
+	return c
+}
+
+func IsLastDepthUseForTesting(img *Image, rest []CommandForTesting) bool {
+	return isLastDepthUse(img, rest)
+}
+
 type CommandQueueManagerForTesting = commandQueueManager
 
 func (c *commandQueueManager) EnqueueCommandForTesting(command CommandForTesting) {

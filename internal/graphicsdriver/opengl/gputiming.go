@@ -227,7 +227,7 @@ func (g *Graphics) beginPass(dst *Image, depth bool) {
 	}
 	g.endPass()
 	t.lastDst = dst
-	hasDepth := depth || dst.depthBuffer != 0
+	hasDepth := depth || dst.depthTexture != 0
 	if t.timings.On() {
 		t.timings.AddPass(g.frame, hasDepth)
 	}

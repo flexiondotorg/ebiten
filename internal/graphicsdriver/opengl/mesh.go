@@ -17,7 +17,6 @@
 package opengl
 
 import (
-	"errors"
 	"unsafe"
 
 	"github.com/hajimehoshi/ebiten/v2/internal/graphics"
@@ -69,6 +68,11 @@ func (g *Graphics) endMeshDraws() {
 	g.context.ctx.BindVertexArray(g.state.vertexArray)
 	g.context.ctx.BindBuffer(gl.ARRAY_BUFFER, uint32(g.state.arrayBuffer))
 	*s = meshDrawState{}
+}
+
+// CanReadDepth implements graphicsdriver.DepthSourcer. Depth textures are core in OpenGL 3.2, OpenGL ES 3.0, and WebGL 2.
+func (g *Graphics) CanReadDepth() bool {
+	return true
 }
 
 func (g *Graphics) CanDrawMesh() bool {
@@ -186,10 +190,12 @@ func (g *Graphics) DrawMesh(dstID graphicsdriver.ImageID, srcIDs [graphics.Shade
 	return nil
 }
 
-// DiscardDepth invalidates the depth attachment of dst when the context can and dst is still bound.
-func (g *Graphics) DiscardDepth(dstID graphicsdriver.ImageID) {
+// DiscardDepth invalidates the depth attachment of the image on OpenGL ES, and binds the framebuffer of the image
+// first when it is not bound, as after a read of its depth.
+func (g *Graphics) DiscardDepth(id graphicsdriver.ImageID) {
 	c, ok := g.context.ctx.(interface{ InvalidateDepth() })
-	if i := g.images[dstID]; ok && i != nil && i.depthBuffer != 0 && i.framebuffer != nil && g.context.lastFramebuffer == i.framebuffer.native {
+	if i := g.images[id]; ok && g.context.ctx.IsES() && i != nil && i.depthTexture != 0 && i.framebuffer != nil {
+		g.context.bindFramebuffer(i.framebuffer.native)
 		c.InvalidateDepth()
 	}
 }
@@ -199,16 +205,18 @@ func (g *Graphics) DiscardDepth(dstID graphicsdriver.ImageID) {
 func (i *Image) useDepth() error {
 	c := &i.graphics.context
 	clearDepth := i.depthFrame != i.graphics.frame
-	if i.depthBuffer == 0 {
-		r := c.ctx.CreateRenderbuffer()
-		if r <= 0 {
-			return errors.New("opengl: creating depth renderbuffer failed")
-		}
-		i.depthBuffer = renderbufferNative(r)
-		c.bindRenderbuffer(i.depthBuffer)
+	if i.depthTexture == 0 {
+		// A depth texture, not a renderbuffer, so that a draw can read it with Blend.SourceDepth. Making it binds it,
+		// so bind the source of the draw on that unit again.
+		src := c.lastTextures[c.lastActiveTexture]
 		w, h := i.viewportSize()
-		c.ctx.RenderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, int32(w), int32(h))
-		c.ctx.FramebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, uint32(i.depthBuffer))
+		t, err := c.newTextureOfFormat(w, h, gl.DEPTH_COMPONENT24, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT)
+		if err != nil {
+			return err
+		}
+		c.bindTexture(src)
+		i.depthTexture = t
+		c.ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, uint32(t), 0)
 		clearDepth = true
 	}
 	if clearDepth {

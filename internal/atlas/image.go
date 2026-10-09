@@ -418,6 +418,7 @@ func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 	if len(shader.ir.Attributes) > 4 {
 		panic("atlas: Image.DrawTriangles: a shader with instance attributes can draw only a mesh")
 	}
+	checkSourceDepth(srcs, blend)
 
 	backendsM.Lock()
 	defer backendsM.Unlock()
@@ -437,6 +438,14 @@ func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 	}
 
 	i.drawTriangles(srcs, vertices, indices, blend, dstRegion, srcRegions, shader, uniforms)
+}
+
+// checkSourceDepth panics when a draw reads the depth of source 0 and source 0 is not an unmanaged image.
+// An unmanaged image is never on an atlas, so the depth buffer of its backend is its own.
+func checkSourceDepth(srcs [graphics.ShaderSrcImageCount]*Image, blend graphicsdriver.Blend) {
+	if blend.SourceDepth && (srcs[0] == nil || srcs[0].imageType != ImageTypeUnmanaged) {
+		panic("atlas: the source of a depth read must be an unmanaged image")
+	}
 }
 
 func (i *Image) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32) {
@@ -539,6 +548,7 @@ func (i *Image) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Image, mesh *graphi
 	if len(shader.ir.Attributes) != 8 {
 		panic("atlas: Image.DrawMesh: the shader must have a vertex function with instance attributes")
 	}
+	checkSourceDepth(srcs, blend)
 
 	backends := make([]*backend, 0, len(srcs))
 	for _, src := range srcs {

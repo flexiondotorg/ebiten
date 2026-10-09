@@ -79,6 +79,9 @@ type Image struct {
 	// usageCallbacks is valid only when the image is not a sub-image.
 	usageCallbacks map[int64]usageCallback
 
+	// depth reports whether a Depth draw has given the image a depth buffer.
+	depth bool
+
 	// inUsageCallbacks reports whether the image is in usageCallbacks.
 	inUsageCallbacks atomic.Bool
 
@@ -799,9 +802,15 @@ type DrawTrianglesShaderOptions struct {
 	// destination, and writes its depth. The destination gets a depth buffer on its first
 	// Depth draw. The depth buffer is cleared before the first Depth draw of the destination
 	// in each frame. Without Mesh, the destination must be an unmanaged image, not a
-	// sub-image, the shader must have a Vertex function, and only OpenGL tests the depth:
-	// the other graphics libraries draw as without Depth.
+	// sub-image, and the shader must have a Vertex function.
 	Depth bool
+
+	// SourceDepth makes image 0 of the shader read the depth buffer of Images[0] in place of its
+	// color. The red channel holds the depth of the last Depth draw of this frame, from 0 at the
+	// near plane to 1 at the far plane. Images[0] must be an unmanaged image, not a sub-image,
+	// with a depth buffer, and not the destination. SourceDepth panics when
+	// IsDepthSourceSupported is false.
+	SourceDepth bool
 }
 
 // Check the number of images.
@@ -920,6 +929,20 @@ func (i *Image) DrawTrianglesShader32(vertices []Vertex, indices []uint32, shade
 		}
 	}
 
+	if options != nil && options.SourceDepth {
+		src := options.Images[0]
+		switch {
+		case !IsDepthSourceSupported():
+			panic("ebiten: the graphics driver cannot read a depth buffer with DrawTrianglesShaderOptions.SourceDepth")
+		case src == nil || src.isSubImage():
+			panic("ebiten: Images[0] must be an image, not a sub-image, with DrawTrianglesShaderOptions.SourceDepth")
+		case !src.depth:
+			panic("ebiten: Images[0] must have a depth buffer with DrawTrianglesShaderOptions.SourceDepth")
+		case src == i || src == i.original:
+			panic("ebiten: Images[0] must not be the destination with DrawTrianglesShaderOptions.SourceDepth")
+		}
+	}
+
 	if mesh == nil && len(indices) == 0 {
 		return
 	}
@@ -973,7 +996,12 @@ func (i *Image) DrawTrianglesShader32(vertices []Vertex, indices []uint32, shade
 		blend = options.CompositeMode.blend().internalBlend()
 	}
 	// A triangle draw carries its depth test in the blend, which every layer passes to the driver.
+	// The depth read of source 0 rides in the blend too.
 	blend.DepthTest = mesh == nil && options.Depth
+	blend.SourceDepth = options.SourceDepth
+	if options.Depth {
+		i.depth = true
+	}
 
 	vs := i.ensureTmpVertices(len(vertices) * graphics.VertexFloatCount)
 	// Vertex has the same layout as the internal vertex format, so one copy takes all the vertices.
@@ -1495,6 +1523,7 @@ func (i *Image) Deallocate() {
 	}
 	i.invokeUsageCallbacks()
 	i.image.Deallocate()
+	i.depth = false
 
 	i.usageCallbacksMu.Lock()
 	defer i.usageCallbacksMu.Unlock()

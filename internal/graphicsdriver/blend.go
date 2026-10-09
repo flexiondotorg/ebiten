@@ -23,9 +23,11 @@ type Blend struct {
 	BlendOperationAlpha         BlendOperation
 
 	// DepthTest keeps a fragment of a triangle draw only when it is at or nearer than the depth
-	// buffer of the destination, and writes its depth, as the depth of a mesh draw does. Only
-	// OpenGL draws it.
+	// buffer of the destination, and writes its depth, as the depth of a mesh draw does.
 	DepthTest bool
+
+	// SourceDepth binds the depth buffer of source 0 in place of its color, on a DepthSourcer.
+	SourceDepth bool
 }
 
 // BlendFactor and BlendOperation must be synced with internal/graphicsdriver/playstation5/graphics_playstation5.h.

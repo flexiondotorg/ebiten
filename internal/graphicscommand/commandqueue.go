@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"image"
 	"math"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -239,6 +238,30 @@ func depthDst(c command) *Image {
 	return nil
 }
 
+// depthSrc returns the source of a draw that reads the depth of source 0, or nil.
+func depthSrc(c command) *Image {
+	if c, ok := c.(*drawMeshCommand); ok && c.blend.SourceDepth {
+		return c.srcs[0]
+	}
+	if c, ok := c.(*drawTrianglesCommand); ok && c.blend.SourceDepth {
+		return c.srcs[0]
+	}
+	return nil
+}
+
+// isLastDepthUse reports whether no command of rest draws with the depth test into img or reads the depth of img.
+func isLastDepthUse(img *Image, rest []command) bool {
+	if img == nil {
+		return false
+	}
+	for _, c := range rest {
+		if depthDst(c) == img || depthSrc(c) == img {
+			return false
+		}
+	}
+	return true
+}
+
 func (q *commandQueue) lastVertices(n int) []float32 {
 	return q.vertices[len(q.vertices)-n : len(q.vertices)]
 }
@@ -394,10 +417,14 @@ func (q *commandQueue) flush(graphicsDriver graphicsdriver.Graphics, mode graphi
 			if err := c.Exec(q, graphicsDriver, indexOffset); err != nil {
 				return err
 			}
-			// A depth buffer clears at its first use in a frame, so the last flush of a frame discards it after its last draw.
+			// A depth buffer clears at its first use in a frame, so the last flush of a frame discards it after its last
+			// draw or read.
 			if dd, ok := graphicsDriver.(interface{ DiscardDepth(graphicsdriver.ImageID) }); ok && mode != graphicsdriver.FlushModeIntermediate {
-				if dst := depthDst(c); dst != nil && !slices.ContainsFunc(cs[i+1:], func(c command) bool { return depthDst(c) == dst }) {
+				if dst := depthDst(c); isLastDepthUse(dst, cs[i+1:]) {
 					dd.DiscardDepth(dst.image.ID())
+				}
+				if src := depthSrc(c); isLastDepthUse(src, cs[i+1:]) {
+					dd.DiscardDepth(src.image.ID())
 				}
 			}
 			if debug.IsDebug {

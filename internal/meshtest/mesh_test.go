@@ -125,6 +125,16 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
 }
 `
 
+// depthShaderSource writes the depth of source 0 into the red channel.
+const depthShaderSource = `//kage:unit pixels
+
+package main
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+	return vec4(imageSrc0UnsafeAt(srcPos).r, 0, 0, 1)
+}
+`
+
 const (
 	meshSize = 16
 	nearZ    = -0.5
@@ -324,13 +334,94 @@ func TestMeshDepth(t *testing.T) {
 	})
 }
 
+// drawDepth draws the depth of src into dst with SourceDepth.
+func drawDepth(dst, src *ebiten.Image, s *ebiten.Shader) {
+	w, h := float32(src.Bounds().Dx()), float32(src.Bounds().Dy())
+	vs := []ebiten.Vertex{
+		{DstX: 0, DstY: 0, SrcX: 0, SrcY: 0, ColorA: 1},
+		{DstX: w, DstY: 0, SrcX: w, SrcY: 0, ColorA: 1},
+		{DstX: 0, DstY: h, SrcX: 0, SrcY: h, ColorA: 1},
+		{DstX: w, DstY: h, SrcX: w, SrcY: h, ColorA: 1},
+	}
+	op := &ebiten.DrawTrianglesShaderOptions{
+		Blend:       ebiten.BlendCopy,
+		SourceDepth: true,
+	}
+	op.Images[0] = src
+	dst.DrawTrianglesShader32(vs, []uint32{0, 1, 2, 1, 2, 3}, s, op)
+}
+
+// checkDepth checks the red channel of dst against the depth that want gives at a point, from 0 at the near plane to
+// 1 at the far plane, within one step of 8 bits.
+func checkDepth(t *testing.T, dst *ebiten.Image, want func(p image.Point) float64) {
+	t.Helper()
+	b := dst.Bounds()
+	for j := b.Min.Y; j < b.Max.Y; j++ {
+		for i := b.Min.X; i < b.Max.X; i++ {
+			got := dst.At(i, j).(color.RGBA)
+			w := want(image.Pt(i, j)) * 0xff
+			if d := float64(got.R) - w; d < -1 || d > 1 || got.A != 0xff {
+				t.Errorf("dst.At(%d, %d): got: %v, want: red %.2f, alpha 255", i, j, got, w)
+			}
+		}
+	}
+}
+
+// TestMeshSourceDepth checks that a draw with SourceDepth reads the depth of two overlapping meshes, where the nearer
+// mesh wins, and the clear depth elsewhere.
+func TestMeshSourceDepth(t *testing.T) {
+	var supported bool
+	runOnGameUpdate(func() {
+		if supported = ebiten.IsDepthSourceSupported(); !supported {
+			return
+		}
+		s, err := ebiten.NewShader([]byte(meshShaderSource))
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		ds, err := ebiten.NewShader([]byte(depthShaderSource))
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		m := newQuadMesh()
+		a := ebiten.NewImageWithOptions(image.Rect(0, 0, 64, 64), &ebiten.NewImageOptions{Unmanaged: true})
+		b := ebiten.NewImageWithOptions(image.Rect(0, 0, 64, 64), &ebiten.NewImageOptions{Unmanaged: true})
+
+		// The near quad draws first, so that the far quad passes the depth test only where it does not overlap.
+		for _, i := range []ebiten.Vertex{instance(16, 16, nearZ, blue), instance(8, 8, farZ, red)} {
+			a.DrawTrianglesShader32([]ebiten.Vertex{i}, nil, s, &ebiten.DrawTrianglesShaderOptions{
+				Mesh:  m,
+				Depth: true,
+			})
+		}
+		drawDepth(b, a, ds)
+
+		// The vertex shader puts nearZ and farZ in normalized device coordinates, which map to the depth range 0 to 1.
+		checkDepth(t, b, func(p image.Point) float64 {
+			switch {
+			case inQuad(p, 16, 16):
+				return (nearZ + 1) / 2
+			case inQuad(p, 8, 8):
+				return (farZ + 1) / 2
+			}
+			return 1
+		})
+	})
+	if !supported {
+		t.Skip("the graphics driver cannot read a depth buffer")
+	}
+}
+
 // TestMeshDepthDiscard checks that the depth discard at the end of a frame keeps the pixels, and that it waits for the
-// last depth draw to a destination when the frame draws to another destination between depth draws. The pixels are
-// read in the next frame, because a read flushes the frame in the middle, and only the last flush of a frame discards.
+// last depth draw to a destination when the frame draws to another destination between depth draws, and for a read of
+// the depth after the last depth draw. The pixels are read in the next frame, because a read flushes the frame in the
+// middle, and only the last flush of a frame discards.
 func TestMeshDepthDiscard(t *testing.T) {
-	var s *ebiten.Shader
+	var s, ds *ebiten.Shader
 	var m *ebiten.Mesh
-	var dst, other *ebiten.Image
+	var dst, other, depth *ebiten.Image
 	draw := func(img *ebiten.Image, x, y float32, z float32, clr color.RGBA) {
 		img.DrawTrianglesShader32([]ebiten.Vertex{instance(x, y, z, clr)}, nil, s, &ebiten.DrawTrianglesShaderOptions{
 			Mesh:  m,
@@ -354,10 +445,33 @@ func TestMeshDepthDiscard(t *testing.T) {
 			draw(dst, 16, 16, nearZ, blue)
 			draw(other, 0, 0, nearZ, red)
 			draw(dst, 24, 24, farZ, green)
+
+			// A read of the depth of dst after its last depth draw, and a draw that binds another image.
+			if ebiten.IsDepthSourceSupported() {
+				ds, err = ebiten.NewShader([]byte(depthShaderSource))
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				depth = ebiten.NewImageWithOptions(image.Rect(0, 0, 64, 64), &ebiten.NewImageOptions{Unmanaged: true})
+				drawDepth(depth, dst, ds)
+				draw(other, 0, 0, nearZ, red)
+			}
 			return
 		}
 		if s == nil {
 			return
+		}
+		if depth != nil {
+			checkDepth(t, depth, func(p image.Point) float64 {
+				switch {
+				case inQuad(p, 16, 16):
+					return (nearZ + 1) / 2
+				case inQuad(p, 24, 24):
+					return (farZ + 1) / 2
+				}
+				return 1
+			})
 		}
 		checkPixels(t, dst, func(p image.Point) color.RGBA {
 			switch {

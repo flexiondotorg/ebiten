@@ -309,6 +309,9 @@ func (g *Graphics) useDestinationAndProgram(dstID graphicsdriver.ImageID, srcIDs
 		imgs[i].valid = true
 		imgs[i].native = g.images[srcID].texture
 	}
+	if blend.SourceDepth {
+		imgs[0].native = g.images[srcIDs[0]].depthTexture
+	}
 
 	if err := g.useProgram(program, g.uniformVars, imgs); err != nil {
 		return nil, err
