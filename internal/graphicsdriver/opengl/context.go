@@ -105,6 +105,7 @@ type context struct {
 	lastFramebuffer                 framebufferNative
 	lastTextures                    [graphics.ShaderSrcImageCount]textureNative // The texture bound to each texture unit.
 	lastActiveTexture               int
+	emptyTexture                    textureNative // A transparent 1x1 texture for a source slot without an image.
 	lastViewportWidth               int
 	lastViewportHeight              int
 	lastBlend                       graphicsdriver.Blend
@@ -117,6 +118,25 @@ type context struct {
 
 func (c *context) bindTexture(t textureNative) {
 	c.bindTextureToUnit(c.lastActiveTexture, t)
+}
+
+// bindEmptyTextureToUnit binds the empty texture to the texture unit idx, and makes the texture at its first use.
+func (c *context) bindEmptyTextureToUnit(idx int) error {
+	if c.emptyTexture == 0 {
+		// Making the texture binds it to the active unit, so make idx the active unit first.
+		if c.lastActiveTexture != idx {
+			c.ctx.ActiveTexture(uint32(gl.TEXTURE0 + idx))
+			c.lastActiveTexture = idx
+		}
+		t, err := c.newTexture(1, 1)
+		if err != nil {
+			return err
+		}
+		c.ctx.TexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, make([]byte, 4))
+		c.emptyTexture = t
+	}
+	c.bindTextureToUnit(idx, c.emptyTexture)
+	return nil
 }
 
 // bindTextureToUnit binds the texture t to the texture unit idx, unless the unit has it already.
@@ -193,6 +213,7 @@ func (c *context) reset() error {
 
 	c.locationCache = newLocationCache()
 	c.lastTextures = [graphics.ShaderSrcImageCount]textureNative{}
+	c.emptyTexture = 0
 	c.ctx.ActiveTexture(gl.TEXTURE0)
 	c.lastActiveTexture = 0
 	c.lastFramebuffer = invalidFramebuffer

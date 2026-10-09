@@ -3515,3 +3515,47 @@ func Fragment(dstPos vec4, src0Pos vec2, color vec4) vec4 {
 		})
 	}
 }
+
+// A slot without an image must read transparent black, after an earlier draw of the same shader had the destination of
+// this draw in that slot.
+func TestShaderEmptySourceSlot(t *testing.T) {
+	const w, h = 16, 16
+
+	s, err := ebiten.NewShader([]byte(`//kage:unit pixels
+
+package main
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+	return imageSrc0UnsafeAt(srcPos) + imageSrc1UnsafeAtFromSrc0Pos(srcPos)
+}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	newImage := func(clr color.Color) *ebiten.Image {
+		img := ebiten.NewImageWithOptions(image.Rect(0, 0, w, h), &ebiten.NewImageOptions{Unmanaged: true})
+		img.Fill(clr)
+		return img
+	}
+	green := color.RGBA{G: 0xff, A: 0xff}
+	a, b, c := newImage(green), newImage(color.RGBA{R: 0xff, A: 0xff}), newImage(color.Transparent)
+
+	op := &ebiten.DrawRectShaderOptions{Blend: ebiten.BlendCopy}
+	op.Images[0] = a
+	op.Images[1] = b
+	c.DrawRectShader(w, h, s, op)
+	op.Images[1] = nil
+	b.DrawRectShader(w, h, s, op)
+
+	for j := range h {
+		for i := range w {
+			if got, want := c.At(i, j).(color.RGBA), (color.RGBA{R: 0xff, G: 0xff, A: 0xff}); got != want {
+				t.Errorf("c.At(%d, %d): got: %v, want: %v", i, j, got, want)
+			}
+			if got, want := b.At(i, j).(color.RGBA), green; got != want {
+				t.Errorf("b.At(%d, %d): got: %v, want: %v", i, j, got, want)
+			}
+		}
+	}
+}
