@@ -165,7 +165,7 @@ func (w NSWindow) IsVisible() bool {
 }
 
 func (w NSWindow) OcclusionState() NSUInteger {
-	return NSUInteger(w.Send(sel_occlusionState))
+	return NSUInteger(objcutil.Send(w.ID, sel_occlusionState))
 }
 
 func (w NSWindow) InLiveResize() bool {
