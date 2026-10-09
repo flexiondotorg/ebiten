@@ -137,6 +137,18 @@ type FinalScreenDrawer interface {
 	DrawFinalScreen(screen FinalScreen, offscreen *Image, geoM GeoM)
 }
 
+// FinalScreenCoverer is an optional interface for a game that implements [FinalScreenDrawer].
+type FinalScreenCoverer interface {
+	// IsFinalScreenCovered reports whether the next DrawFinalScreen call draws every pixel of the final screen
+	// with an opaque color.
+	//
+	// IsFinalScreenCovered is called after Draw and before DrawFinalScreen.
+	// If IsFinalScreenCovered returns true, the final screen is not cleared before DrawFinalScreen,
+	// and its contents are undefined until DrawFinalScreen draws them.
+	// DrawFinalScreen is then called even when Draw does not modify the offscreen.
+	IsFinalScreenCovered() bool
+}
+
 // DefaultTPS represents the default ticks per second, which represents how many times game updating happens in a second.
 const DefaultTPS = clock.DefaultTPS
 
