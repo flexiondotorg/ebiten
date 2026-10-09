@@ -138,6 +138,35 @@ func TestFrameTimingsLateCompletion(t *testing.T) {
 	}
 }
 
+func TestFrameTimingsOverlap(t *testing.T) {
+	var f FrameTimings
+	var dst [4]FrameTiming
+	f.Read(nil)
+	runFrame(&f, 0, true)
+	// The second command buffer of frame 1 starts 1 ms before the first ends, and frame 2 starts
+	// 2 ms before frame 1 ends: each overlap counts once, in the earlier command buffer.
+	for frame := int64(1); frame <= 2; frame++ {
+		runFrame(&f, frame, false)
+	}
+	f.AddGPU(1, 10.000, 10.003)
+	f.AddGPU(1, 10.002, 10.006)
+	f.Finish(1)
+	f.AddGPU(2, 10.004, 10.008)
+	f.Finish(2)
+	n, _ := f.Read(dst[:])
+	if n != 2 {
+		t.Fatalf("got %d records, want 2", n)
+	}
+	for i, want := range []time.Duration{6 * time.Millisecond, 2 * time.Millisecond} {
+		if got := dst[i].GPU; (got - want).Abs() > time.Microsecond {
+			t.Errorf("frame %d: got GPU time %v, want %v", dst[i].Frame, got, want)
+		}
+	}
+	if got := dst[1]; got.GPUStart != 10.004 || got.GPUEnd != 10.008 {
+		t.Errorf("frame 2: got GPU start %v and end %v, want 10.004 and 10.008", got.GPUStart, got.GPUEnd)
+	}
+}
+
 func TestFrameTimingsAllocations(t *testing.T) {
 	var f FrameTimings
 	var dst [4]FrameTiming

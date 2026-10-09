@@ -67,11 +67,12 @@ type Graphics struct {
 	// unusedBuffers maps a buffer that no frame uses to its length.
 	unusedBuffers map[mtl.Buffer]uintptr
 
-	// freeCBs, freeBuffers, and sortedBuffers keep the slices of the completed frames and the sort
-	// of unusedBuffers, so that a frame does not allocate them.
+	// freeCBs, freeBuffers, sortedBuffers, and doneFrames keep the slices of the completed frames, the
+	// sort of unusedBuffers, and the completed frames in order, so that a frame does not allocate them.
 	freeCBs       [][]mtl.CommandBuffer
 	freeBuffers   [][]pooledBuffer
 	sortedBuffers []pooledBuffer
+	doneFrames    []int64
 
 	// timings holds the GPU timing of the latest frames, see graphicsdriver.FrameTimer.
 	timings graphicsdriver.FrameTimings
@@ -250,6 +251,13 @@ loop:
 				continue loop
 			}
 		}
+		g.doneFrames = append(g.doneFrames, frame)
+	}
+
+	// The GPU timing takes the command buffers in the order of the queue.
+	slices.Sort(g.doneFrames)
+	for _, frame := range g.doneFrames {
+		cbs := g.frameToCB[frame]
 		g.passTimes.complete(frame)
 		timed := g.timings.On()
 		for _, cb := range cbs {
@@ -276,6 +284,7 @@ loop:
 			g.freeBuffers = append(g.freeBuffers, bufs[:0])
 		}
 	}
+	g.doneFrames = g.doneFrames[:0]
 
 	const maxUnusedBuffers = 10
 	if len(g.unusedBuffers) > maxUnusedBuffers {

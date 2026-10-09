@@ -123,8 +123,9 @@ type FrameTiming struct {
 	// buffer of the frame and ends the last one. They are zero on OpenGL.
 	GPUStart, GPUEnd float64
 
-	// GPU is the sum of the GPU times of the command buffers of the frame on Metal, and of the
-	// timer queries of the flushes of the frame on OpenGL. It is zero when the GPU time is unknown.
+	// GPU is the time that the GPU spent on the command buffers of the frame on Metal, without the
+	// overlaps with the earlier command buffers, and the sum of the timer queries of the flushes of
+	// the frame on OpenGL. It is zero when the GPU time is unknown.
 	GPU time.Duration
 
 	// QueueWait is the time that the frame waits for new command buffers from the queue.

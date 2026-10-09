@@ -38,6 +38,9 @@ type FrameTimings struct {
 
 	// next is the number of the oldest frame that is not read yet.
 	next int64
+
+	// busyEnd is the latest GPU end host time of the command buffers that AddGPU added.
+	busyEnd float64
 }
 
 type frameRecord struct {
@@ -96,16 +99,28 @@ func (f *FrameTimings) AddQueueWait(frame int64, d time.Duration) {
 }
 
 // AddGPU adds the GPU start and end host times of a completed command buffer of frame, in
-// seconds.
+// seconds. Call it in the order of the command buffers on the queue.
+//
+// The GPU runs the command buffers of a queue with overlaps, and the span of one command buffer
+// covers the work of the others that run with it. So the GPU time counts only the part of the span
+// after the end of the earlier command buffers, and the sum of the GPU times of the frames is the
+// time that the GPU was busy.
 func (f *FrameTimings) AddGPU(frame int64, start, end float64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if end < start {
+		return
+	}
+	from := max(start, f.busyEnd)
+	f.busyEnd = max(f.busyEnd, end)
 	r := f.find(frame)
-	if r == nil || end < start {
+	if r == nil {
 		return
 	}
 	t := &r.timing
-	t.GPU += time.Duration((end - start) * float64(time.Second))
+	if end > from {
+		t.GPU += time.Duration((end - from) * float64(time.Second))
+	}
 	if t.GPUStart == 0 || start < t.GPUStart {
 		t.GPUStart = start
 	}
