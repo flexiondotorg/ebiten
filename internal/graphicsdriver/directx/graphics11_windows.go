@@ -186,10 +186,11 @@ type graphics11 struct {
 	instanceBuffer            *_ID3D11Buffer
 	instanceBufferSizeInBytes uint32
 
-	// depthStencilState is the depth test of the depth draws, and frame counts the ended frames, for the depth clear
-	// of each frame. They are untested.
-	depthStencilState *_ID3D11DepthStencilState
-	frame             int64
+	// depthStencilState is the depth test of the depth draws, depthReadOnlyState is the same test without the depth
+	// write, and frame counts the ended frames, for the depth clear of each frame. They are untested.
+	depthStencilState  *_ID3D11DepthStencilState
+	depthReadOnlyState *_ID3D11DepthStencilState
+	frame              int64
 
 	vsyncEnabled bool
 	window       windows.HWND
@@ -566,7 +567,7 @@ func (g *graphics11) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphic
 	var dsv *_ID3D11DepthStencilView
 	if blend.DepthTest {
 		var err error
-		if dsv, err = g.useDepth(dstID); err != nil {
+		if dsv, err = g.useDepth(dstID, srcIDs, blend); err != nil {
 			return err
 		}
 	}
@@ -626,7 +627,7 @@ func (g *graphics11) beginDraw(dstID graphicsdriver.ImageID, srcIDs [graphics.Sh
 
 	// Set the shader parameters.
 	shader := g.shaders[shaderID]
-	if err := shader.use(uniforms, srcs); err != nil {
+	if err := shader.use(uniforms, srcs, blend.DepthSources); err != nil {
 		return nil, err
 	}
 
@@ -641,7 +642,10 @@ func (g *graphics11) beginDraw(dstID graphicsdriver.ImageID, srcIDs [graphics.Sh
 
 // useDepth gives dst a depth buffer, clears it at the first depth draw of each frame, sets the depth test,
 // and returns the depth-stencil view for beginDraw. It is untested.
-func (g *graphics11) useDepth(dstID graphicsdriver.ImageID) (*_ID3D11DepthStencilView, error) {
+//
+// A draw with Blend.DepthReadOnly tests the depth without writing it. When such a draw also reads the depth of dst,
+// the depth-stencil view is read-only, so that the shader resource view of the same depth buffer stays bound.
+func (g *graphics11) useDepth(dstID graphicsdriver.ImageID, srcIDs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, blend graphicsdriver.Blend) (*_ID3D11DepthStencilView, error) {
 	dst := g.images[dstID]
 	if dst.depthStencilView == nil || dst.depthFrame != g.frame {
 		v, err := dst.ensureDepthStencilView()
@@ -652,30 +656,61 @@ func (g *graphics11) useDepth(dstID graphicsdriver.ImageID) (*_ID3D11DepthStenci
 		dst.depthFrame = g.frame
 	}
 
-	if g.depthStencilState == nil {
-		keep := _D3D11_DEPTH_STENCILOP_DESC{
-			StencilFailOp:      _D3D11_STENCIL_OP_KEEP,
-			StencilDepthFailOp: _D3D11_STENCIL_OP_KEEP,
-			StencilPassOp:      _D3D11_STENCIL_OP_KEEP,
-			StencilFunc:        _D3D11_COMPARISON_ALWAYS,
+	if !blend.DepthReadOnly {
+		if g.depthStencilState == nil {
+			s, err := g.newDepthStencilState(_D3D11_DEPTH_WRITE_MASK_ALL)
+			if err != nil {
+				return nil, err
+			}
+			g.depthStencilState = s
 		}
-		s, err := g.device.CreateDepthStencilState(&_D3D11_DEPTH_STENCIL_DESC{
-			DepthEnable:      1,
-			DepthWriteMask:   _D3D11_DEPTH_WRITE_MASK_ALL,
-			DepthFunc:        _D3D11_COMPARISON_LESS_EQUAL,
-			StencilReadMask:  _D3D11_DEFAULT_STENCIL_READ_MASK,
-			StencilWriteMask: _D3D11_DEFAULT_STENCIL_WRITE_MASK,
-			FrontFace:        keep,
-			BackFace:         keep,
-		})
+		// Without a depth-stencil view, the other draws ignore this state.
+		g.deviceContext.OMSetDepthStencilState(g.depthStencilState, 0)
+		return dst.depthStencilView, nil
+	}
+
+	if g.depthReadOnlyState == nil {
+		s, err := g.newDepthStencilState(_D3D11_DEPTH_WRITE_MASK_ZERO)
 		if err != nil {
 			return nil, err
 		}
-		g.depthStencilState = s
+		g.depthReadOnlyState = s
 	}
-	// Without a depth-stencil view, the other draws ignore this state.
-	g.deviceContext.OMSetDepthStencilState(g.depthStencilState, 0)
+	g.deviceContext.OMSetDepthStencilState(g.depthReadOnlyState, 0)
+	for i, id := range srcIDs {
+		if blend.DepthSources[i] && id == dstID {
+			return dst.ensureDepthReadOnlyView()
+		}
+	}
 	return dst.depthStencilView, nil
+}
+
+// newDepthStencilState makes a depth test that passes for a depth less than or equal to the depth buffer, and writes the
+// depth with writeMask.
+func (g *graphics11) newDepthStencilState(writeMask _D3D11_DEPTH_WRITE_MASK) (*_ID3D11DepthStencilState, error) {
+	keep := _D3D11_DEPTH_STENCILOP_DESC{
+		StencilFailOp:      _D3D11_STENCIL_OP_KEEP,
+		StencilDepthFailOp: _D3D11_STENCIL_OP_KEEP,
+		StencilPassOp:      _D3D11_STENCIL_OP_KEEP,
+		StencilFunc:        _D3D11_COMPARISON_ALWAYS,
+	}
+	return g.device.CreateDepthStencilState(&_D3D11_DEPTH_STENCIL_DESC{
+		DepthEnable:      1,
+		DepthWriteMask:   writeMask,
+		DepthFunc:        _D3D11_COMPARISON_LESS_EQUAL,
+		StencilReadMask:  _D3D11_DEFAULT_STENCIL_READ_MASK,
+		StencilWriteMask: _D3D11_DEFAULT_STENCIL_WRITE_MASK,
+		FrontFace:        keep,
+		BackFace:         keep,
+	})
+}
+
+// CanReadDepth implements graphicsdriver.DepthSourcer.
+//
+// A draw that tests the depth of its destination and reads it too needs a read-only depth-stencil view, which
+// Direct3D 11 brings at feature level 11_0. Feature levels 10_0 and 10_1 have none, so they read no depth.
+func (g *graphics11) CanReadDepth() bool {
+	return g.featureLevel >= _D3D_FEATURE_LEVEL_11_0
 }
 
 // mesh11 is a mesh on the GPU. It is untested.
@@ -727,7 +762,7 @@ func (g *graphics11) DrawMesh(dstID graphicsdriver.ImageID, srcIDs [graphics.Sha
 	var dsv *_ID3D11DepthStencilView
 	if depth {
 		var err error
-		if dsv, err = g.useDepth(dstID); err != nil {
+		if dsv, err = g.useDepth(dstID, srcIDs, blend); err != nil {
 			return err
 		}
 	}

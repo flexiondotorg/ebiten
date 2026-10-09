@@ -82,7 +82,9 @@ func (s *shader11) disposeImpl() {
 	}
 }
 
-func (s *shader11) use(uniforms []uint32, srcs [graphics.ShaderSrcImageCount]*image11) error {
+// use sets the shader, its uniforms, and its sources. Source i reads the depth buffer of srcs[i] for a true
+// depthSources[i].
+func (s *shader11) use(uniforms []uint32, srcs [graphics.ShaderSrcImageCount]*image11, depthSources [graphics.ShaderSrcImageCount]bool) error {
 	vs, err := s.ensureVertexShader()
 	if err != nil {
 		return err
@@ -123,7 +125,13 @@ func (s *shader11) use(uniforms []uint32, srcs [graphics.ShaderSrcImageCount]*im
 		if src == nil {
 			continue
 		}
-		srv, err := src.getShaderResourceView()
+		var srv *_ID3D11ShaderResourceView
+		var err error
+		if depthSources[i] {
+			srv, err = src.getDepthShaderResourceView()
+		} else {
+			srv, err = src.getShaderResourceView()
+		}
 		if err != nil {
 			return err
 		}

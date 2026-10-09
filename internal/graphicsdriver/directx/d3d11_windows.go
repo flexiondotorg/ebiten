@@ -432,7 +432,14 @@ type _D3D11_SHADER_RESOURCE_VIEW_DESC struct {
 	_             structs.HostLayout
 	Format        _DXGI_FORMAT
 	ViewDimension _D3D11_SRV_DIMENSION
-	_             [4]uint32
+	Texture2D     _D3D11_TEX2D_SRV // The first member of the union.
+	_             [2]uint32
+}
+
+type _D3D11_TEX2D_SRV struct {
+	_               structs.HostLayout
+	MostDetailedMip uint32
+	MipLevels       uint32
 }
 
 type _D3D11_SUBRESOURCE_DATA struct {

@@ -165,6 +165,25 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
 }
 `
 
+// clipZDepthShaderSource puts each vertex at z/w = Custom0, as clipZShaderSource does, and writes the depth of source 0
+// as depthShaderSource does.
+const clipZDepthShaderSource = `//kage:unit pixels
+
+package main
+
+func Vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4) (vec4, vec2, vec4, vec4) {
+	p := imageDstProjection() * vec4(dstPos, 0, 1)
+	return vec4(p.xy*2, custom.x*2, 2), srcPos, color, custom
+}
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+	v := floor(imageSrc0UnsafeAt(srcPos).r * 16777215)
+	r := floor(v / 65536)
+	g := floor((v - r*65536) / 256)
+	return vec4(r, g, v-r*65536-g*256, 255) / 255
+}
+`
+
 // The depth of clip-space z/w runs from 0 at z/w = 0 to 1 at z/w = 1 on every graphics library.
 const (
 	meshSize = 16
@@ -587,6 +606,75 @@ func TestImageDepthSelfRead(t *testing.T) {
 			}
 			return 1
 		})
+	})
+}
+
+// TestImageDepthReadOnlySelfRead checks that a read-only depth draw tests the depth of its destination and reads it in
+// the same draw, and leaves it as it was.
+func TestImageDepthReadOnlySelfRead(t *testing.T) {
+	runOnGameUpdate(func() {
+		if !ebiten.IsDepthSourceSupported() {
+			return
+		}
+		ss, ok := newShaders(t, meshShaderSource, clipZDepthShaderSource, depthShaderSource)
+		if !ok {
+			return
+		}
+		m := newQuadMesh()
+		a := ebiten.NewImageWithOptions(image.Rect(0, 0, 64, 64), &ebiten.NewImageOptions{Unmanaged: true})
+		b := ebiten.NewImageWithOptions(image.Rect(0, 0, 64, 64), &ebiten.NewImageOptions{Unmanaged: true})
+		for _, i := range []ebiten.Vertex{instance(8, 8, nearZ, blue), instance(24, 24, farZ, red)} {
+			a.DrawTrianglesShader32([]ebiten.Vertex{i}, nil, ss[0], &ebiten.DrawTrianglesShaderOptions{
+				Mesh:  m,
+				Depth: true,
+			})
+		}
+
+		// A quad at depth 0.5 over all of a: it hides behind the blue quad, and covers the red quad and the rest.
+		const z = 0.5
+		w, h := float32(a.Bounds().Dx()), float32(a.Bounds().Dy())
+		vs := []ebiten.Vertex{
+			{DstX: 0, DstY: 0, SrcX: 0, SrcY: 0, ColorA: 1, Custom0: z},
+			{DstX: w, DstY: 0, SrcX: w, SrcY: 0, ColorA: 1, Custom0: z},
+			{DstX: 0, DstY: h, SrcX: 0, SrcY: h, ColorA: 1, Custom0: z},
+			{DstX: w, DstY: h, SrcX: w, SrcY: h, ColorA: 1, Custom0: z},
+		}
+		op := &ebiten.DrawTrianglesShaderOptions{
+			Blend:         ebiten.BlendCopy,
+			Depth:         true,
+			DepthReadOnly: true,
+		}
+		op.Images[0] = a
+		op.ImageDepth[0] = true
+		a.DrawTrianglesShader32(vs, []uint32{0, 1, 2, 1, 2, 3}, ss[1], op)
+		drawDepth(b, a, ss[2])
+
+		want := func(p image.Point) float64 {
+			switch {
+			case inQuad(p, 8, 8):
+				return nearZ
+			case inQuad(p, 24, 24):
+				return farZ
+			}
+			return 1
+		}
+		for j := 0; j < 64; j++ {
+			for i := 0; i < 64; i++ {
+				p := image.Pt(i, j)
+				c := a.At(i, j).(color.RGBA)
+				if inQuad(p, 8, 8) {
+					if c != blue {
+						t.Errorf("a.At(%d, %d): got: %v, want: %v", i, j, c, blue)
+					}
+					continue
+				}
+				got := float64(int(c.R)<<16|int(c.G)<<8|int(c.B)) / (1<<24 - 1)
+				if d := got - want(p); d < -1.0/(1<<16) || d > 1.0/(1<<16) || c.A != 0xff {
+					t.Errorf("a.At(%d, %d): got: depth %.6f (%v), want: depth %.6f", i, j, got, c, want(p))
+				}
+			}
+		}
+		checkDepth(t, b, want)
 	})
 }
 
