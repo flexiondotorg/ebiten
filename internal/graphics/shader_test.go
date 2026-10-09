@@ -145,6 +145,41 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
 	}
 }
 
+// TestCompileShaderDepthTexturesMSL checks that the MSL of a shader declares each depth texture as depth2d<float>, and
+// that a read of it returns (depth, 0, 0, 1).
+func TestCompileShaderDepthTexturesMSL(t *testing.T) {
+	const src = `//kage:unit pixels
+
+package main
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+	return imageSrc0UnsafeAt(srcPos) + imageSrc1UnsafeAtFromSrc0Pos(srcPos)
+}
+`
+	ir, err := graphics.CompileShader([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m := msl.CompileWithDepthTextures(ir, 1<<1)
+	for _, want := range []string{
+		"\ttexture2d<float> T0 [[texture(0)]],\n\tdepth2d<float> T1 [[texture(1)]],\n\ttexture2d<float> T2 [[texture(2)]]",
+		"texture2d<float> T0, depth2d<float> T1, texture2d<float> T2",
+		"float4(T1.sample(__texelSampler, floor(",
+	} {
+		if !strings.Contains(m, want) {
+			t.Errorf("the MSL must contain %q but does not:\n%s", want, m)
+		}
+	}
+	if strings.Contains(m, "float4(T0.sample") {
+		t.Errorf("the MSL must read T0 as a color texture but does not:\n%s", m)
+	}
+
+	if m := msl.Compile(ir); strings.Contains(m, "depth2d") || strings.Contains(m, "float4(T1.sample") {
+		t.Errorf("the MSL without depth textures must not declare or read a depth texture:\n%s", m)
+	}
+}
+
 func TestCompileShaderUserVertexSignature(t *testing.T) {
 	cases := []struct {
 		name   string

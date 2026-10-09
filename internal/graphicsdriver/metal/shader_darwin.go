@@ -17,6 +17,7 @@ package metal
 import (
 	"fmt"
 
+	"github.com/hajimehoshi/ebiten/v2/internal/graphics"
 	"github.com/hajimehoshi/ebiten/v2/internal/graphicsdriver"
 	"github.com/hajimehoshi/ebiten/v2/internal/graphicsdriver/metal/mtl"
 	"github.com/hajimehoshi/ebiten/v2/internal/shaderir"
@@ -39,6 +40,22 @@ type Shader struct {
 	fs   mtl.Function
 	vs   mtl.Function
 	rpss map[shaderRpsKey]mtl.RenderPipelineState
+
+	// depthVariants holds the variants of the shader that read depth textures, by the mask of the depth textures.
+	depthVariants map[uint]shaderVariant
+}
+
+// shaderVariant is a library and its entry functions.
+type shaderVariant struct {
+	lib mtl.Library
+	vs  mtl.Function
+	fs  mtl.Function
+}
+
+func (v *shaderVariant) release() {
+	v.vs.Release()
+	v.fs.Release()
+	v.lib.Release()
 }
 
 func newShader(id graphicsdriver.ShaderID, graphics *Graphics, device mtl.Device, program *shaderir.Program) (*Shader, error) {
@@ -62,6 +79,10 @@ func (s *Shader) Dispose() {
 	for key, rps := range s.rpss {
 		rps.Release()
 		delete(s.rpss, key)
+	}
+	for mask, v := range s.depthVariants {
+		v.release()
+		delete(s.depthVariants, mask)
 	}
 	if s.vs != (mtl.Function{}) {
 		s.vs.Release()
@@ -137,9 +158,13 @@ func (s *Shader) RenderPipelineState(view *view, blend graphicsdriver.Blend, scr
 		return rps, nil
 	}
 
+	vs, fs, err := s.functions(view.getMTLDevice(), blend.DepthSources)
+	if err != nil {
+		return mtl.RenderPipelineState{}, err
+	}
 	rpld := mtl.RenderPipelineDescriptor{
-		VertexFunction:   s.vs,
-		FragmentFunction: s.fs,
+		VertexFunction:   vs,
+		FragmentFunction: fs,
 	}
 
 	// TODO: For the precise pixel format, whether the render target is the screen or not must be considered.
@@ -168,4 +193,43 @@ func (s *Shader) RenderPipelineState(view *view, blend graphicsdriver.Blend, scr
 
 	s.rpss[key] = rps
 	return rps, nil
+}
+
+// functions returns the entry functions of the variant of the shader that reads a depth texture for each true
+// depthSources[i], and compiles the variant at its first use.
+func (s *Shader) functions(device mtl.Device, depthSources [graphics.ShaderSrcImageCount]bool) (mtl.Function, mtl.Function, error) {
+	var mask uint
+	for i, on := range depthSources {
+		if on {
+			mask |= 1 << i
+		}
+	}
+	if mask == 0 {
+		return s.vs, s.fs, nil
+	}
+	if v, ok := s.depthVariants[mask]; ok {
+		return v.vs, v.fs, nil
+	}
+
+	src := msl.CompileWithDepthTextures(s.ir, mask)
+	lib, err := device.NewLibraryWithSource(src, mtl.CompileOptions{})
+	if err != nil {
+		return mtl.Function{}, mtl.Function{}, fmt.Errorf("metal: device.MakeLibrary failed: %w, source: %s", err, src)
+	}
+	vs, err := lib.NewFunctionWithName(msl.VertexName)
+	if err != nil {
+		lib.Release()
+		return mtl.Function{}, mtl.Function{}, fmt.Errorf("metal: lib.MakeFunction for vertex failed: %w, source: %s", err, src)
+	}
+	fs, err := lib.NewFunctionWithName(msl.FragmentName)
+	if err != nil {
+		vs.Release()
+		lib.Release()
+		return mtl.Function{}, mtl.Function{}, fmt.Errorf("metal: lib.MakeFunction for fragment failed: %w, source: %s", err, src)
+	}
+	if s.depthVariants == nil {
+		s.depthVariants = map[uint]shaderVariant{}
+	}
+	s.depthVariants[mask] = shaderVariant{lib: lib, vs: vs, fs: fs}
+	return vs, fs, nil
 }
