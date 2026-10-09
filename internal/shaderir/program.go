@@ -74,6 +74,11 @@ type Program struct {
 	// UserVertex reports whether VertexFunc comes from the source's own Vertex function instead of the builtin one.
 	UserVertex bool
 
+	// ProjectionUniform is the index of the uniform variable of the projection matrix, a mat4, or 0 if the program
+	// has none. On OpenGL, the projection flips Y for the screen, whose window coordinates start at the bottom, and the
+	// fragment entry point then gets its position from the top of the screen through it, as on any other image.
+	ProjectionUniform int
+
 	// unusedUniformDwords holds the ranges [start, end) of the uniform dwords that the program never reads,
 	// in the order of the dwords. It is valid when unusedUniformDwordsReady is true.
 	unusedUniformDwords      [][2]int
@@ -574,6 +579,9 @@ func (p *Program) FilterUniformVariables(uniforms []uint32) {
 		reachableUniforms := make([]bool, len(p.Uniforms))
 		for _, idx := range indices {
 			reachableUniforms[idx] = true
+		}
+		if p.ProjectionUniform > 0 {
+			reachableUniforms[p.ProjectionUniform] = true
 		}
 		var idx int
 		for i, typ := range p.Uniforms {

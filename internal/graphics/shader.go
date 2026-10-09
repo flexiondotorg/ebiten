@@ -313,6 +313,7 @@ func CompileShader(fragmentSrc []byte) (*shaderir.Program, error) {
 		ir.UserVertex = true
 	}
 
+	ir.ProjectionUniform = ProjectionMatrixUniformVariableIndex
 	ir.FragmentSource = bytes.Clone(fragmentSrc)
 
 	return ir, nil

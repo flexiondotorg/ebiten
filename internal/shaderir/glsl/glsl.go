@@ -282,6 +282,19 @@ func Compile(p *shaderir.Program, version GLSLVersion) (vertexShader, fragmentSh
 		}
 
 		if p.FragmentFunc.Block != nil && len(p.FragmentFunc.Block.Stmts) > 0 {
+			if p.ProjectionUniform > 0 {
+				// The projection flips Y for the screen, see the OpenGL driver, so the window coordinates of the
+				// screen start at the bottom. The fragment entry point gets its position from the top, as on an
+				// offscreen image, from the height of the screen, which is -2 divided by the flipped scale of Y.
+				fslines = append(fslines, "",
+					fmt.Sprintf("vec4 %s() {", fragCoordName),
+					"\tvec4 p = gl_FragCoord;",
+					fmt.Sprintf("\tif (U%[1]d[1][1] < 0.0) {", p.ProjectionUniform),
+					fmt.Sprintf("\t\tp.y = -2.0/U%[1]d[1][1] - p.y;", p.ProjectionUniform),
+					"\t}",
+					"\treturn p;",
+					"}")
+			}
 			fslines = append(fslines, "")
 			fslines = append(fslines, "void main(void) {")
 			fslines = append(fslines, c.block(p, p.FragmentFunc.Block, p.FragmentFunc.Block, 0)...)
@@ -425,6 +438,10 @@ func constantToNumberLiteral(v constant.Value) string {
 	return fmt.Sprintf("?(unexpected literal: %s)", v)
 }
 
+// fragCoordName is the function of the fragment shader that gives the fragment entry point its position, see
+// Program.ProjectionUniform.
+const fragCoordName = "fragCoordFromTop"
+
 // attributeCopyName returns the name of the local variable that holds a copy of an assigned attribute.
 // An attribute itself is read-only in a vertex shader.
 func attributeCopyName(idx int) string {
@@ -453,6 +470,9 @@ func (c *compileContext) localVariableName(p *shaderir.Program, topBlock *shader
 		nv := len(p.Varyings)
 		switch {
 		case idx == 0:
+			if p.ProjectionUniform > 0 {
+				return fragCoordName + "()"
+			}
 			return "gl_FragCoord"
 		case idx < nv+1:
 			return fmt.Sprintf("V%d", idx-1)
