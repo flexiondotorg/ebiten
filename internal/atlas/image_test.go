@@ -1103,3 +1103,52 @@ func TestDrawTrianglesWithZeroAndNonZeroOffsets(t *testing.T) {
 		})
 	}
 }
+
+// DrawTriangles must not change the caller's vertices when the destination and the source are away from the origin of their backends,
+// and the draw must still land at the right place.
+func TestDrawTrianglesKeepsVertices(t *testing.T) {
+	const w, h = 16, 16
+	// Several small images put the later ones away from the origin of their backends.
+	var imgs []*atlas.Image
+	for range 6 {
+		img := atlas.NewImage(w, h, atlas.ImageTypeRegular)
+		defer img.Deallocate()
+		imgs = append(imgs, img)
+	}
+	src, dst := imgs[4], imgs[5]
+
+	pix := make([]byte, 4*w*h)
+	for i := range w * h {
+		pix[4*i] = byte(i)
+		pix[4*i+1] = byte(i >> 4)
+		pix[4*i+2] = 0x80
+		pix[4*i+3] = 0xff
+	}
+	src.WritePixels(pix, image.Rect(0, 0, w, h))
+
+	vs := quadVertices(w, h, 0, 0, 1)
+	want := append([]float32(nil), vs...)
+	is := graphics.QuadIndices()
+	dr := image.Rect(0, 0, w, h)
+	sr := image.Rect(0, 0, w, h)
+	dst.DrawTriangles([graphics.ShaderSrcImageCount]*atlas.Image{src}, vs, is, graphicsdriver.BlendCopy, dr, [graphics.ShaderSrcImageCount]image.Rectangle{sr}, atlas.NearestFilterShader, nil)
+	for i := range vs {
+		if vs[i] != want[i] {
+			t.Fatalf("vertices[%d]: got %v, want %v", i, vs[i], want[i])
+		}
+	}
+
+	got := make([]byte, 4*w*h)
+	ok, err := dst.ReadPixels(ui.Get().GraphicsDriverForTesting(), got, image.Rect(0, 0, w, h))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("ReadPixels failed")
+	}
+	for i := range got {
+		if got[i] != pix[i] {
+			t.Fatalf("pixel byte %d: got %d, want %d", i, got[i], pix[i])
+		}
+	}
+}

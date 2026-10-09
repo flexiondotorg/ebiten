@@ -25,6 +25,7 @@ import (
 	"math/rand/v2"
 	"reflect"
 	"runtime"
+	"slices"
 	"sync"
 	"testing"
 
@@ -5551,4 +5552,24 @@ func TestImageDrawTrianglesWithNilImageAndEmptyIndices(t *testing.T) {
 	dst := ebiten.NewImage(w, h)
 	vs := make([]ebiten.Vertex, 3)
 	dst.DrawTriangles(vs, nil, nil, nil)
+}
+
+// DrawTriangles must not change the caller's vertices on an atlas page.
+func TestImageDrawTrianglesKeepsVertices(t *testing.T) {
+	var imgs []*ebiten.Image
+	for range 6 {
+		img := ebiten.NewImage(16, 16)
+		img.Fill(color.White)
+		imgs = append(imgs, img)
+	}
+	vs := []ebiten.Vertex{
+		{DstX: 0, DstY: 0, SrcX: 0, SrcY: 0, ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
+		{DstX: 16, DstY: 0, SrcX: 16, SrcY: 0, ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
+		{DstX: 0, DstY: 16, SrcX: 0, SrcY: 16, ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
+	}
+	want := slices.Clone(vs)
+	imgs[5].DrawTriangles(vs, []uint16{0, 1, 2}, imgs[4], nil)
+	if !slices.Equal(vs, want) {
+		t.Errorf("vertices: got %v, want %v", vs, want)
+	}
 }

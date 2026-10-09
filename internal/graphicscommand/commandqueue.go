@@ -141,7 +141,8 @@ func mustUseDifferentVertexBuffer(nextNumVertexFloats int) bool {
 }
 
 // EnqueueDrawTrianglesCommand enqueues a drawing-image command.
-func (q *commandQueue) EnqueueDrawTrianglesCommand(dst *Image, srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32) {
+// offset is added to the first four elements of each vertex in the queue. vertices does not change.
+func (q *commandQueue) EnqueueDrawTrianglesCommand(dst *Image, srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, offset [4]float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32) {
 	if len(vertices) > maxVertexFloatCount {
 		panic(fmt.Sprintf("graphicscommand: len(vertices) must equal to or less than %d but was %d", maxVertexFloatCount, len(vertices)))
 	}
@@ -155,6 +156,18 @@ func (q *commandQueue) EnqueueDrawTrianglesCommand(dst *Image, srcs [graphics.Sh
 	// Assume that all the image sizes are same.
 	// Assume that the images are packed from the front in the slice srcs.
 	q.vertices = append(q.vertices, vertices...)
+	if offset != ([4]float32{}) {
+		// The offset changes the copy in the queue, never the caller's vertices.
+		vs := q.vertices[len(q.vertices)-len(vertices):]
+		for i := 0; i < len(vs); i += graphics.VertexFloatCount {
+			// Create a temporary slice to reduce boundary checks.
+			v := vs[i : i+4]
+			v[0] += offset[0]
+			v[1] += offset[1]
+			v[2] += offset[2]
+			v[3] += offset[3]
+		}
+	}
 	q.appendIndices(indices, uint32(q.tmpNumVertexFloats/graphics.VertexFloatCount))
 	q.tmpNumVertexFloats += len(vertices)
 
@@ -705,11 +718,11 @@ func (c *commandQueueManager) finishCommandQueueFlush(queue *commandQueue, mode 
 	startRequestedPassLog()
 }
 
-func (c *commandQueueManager) enqueueDrawTrianglesCommand(dst *Image, srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32) {
+func (c *commandQueueManager) enqueueDrawTrianglesCommand(dst *Image, srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, offset [4]float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32) {
 	if c.current == nil {
 		c.current = c.pool.get()
 	}
-	c.current.EnqueueDrawTrianglesCommand(dst, srcs, vertices, indices, blend, dstRegion, srcRegions, shader, uniforms)
+	c.current.EnqueueDrawTrianglesCommand(dst, srcs, vertices, offset, indices, blend, dstRegion, srcRegions, shader, uniforms)
 }
 
 func (c *commandQueueManager) enqueueDrawMeshCommand(dst *Image, srcs [graphics.ShaderSrcImageCount]*Image, mesh *Mesh, instances []float32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32, depth bool) {

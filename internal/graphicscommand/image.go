@@ -137,6 +137,13 @@ func (i *Image) InternalSize() (int, int) {
 // If the source image is not specified, i.e., the first element of srcs is nil, the
 // elements for the source image position are passed as they are.
 func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32) {
+	i.DrawTrianglesWithOffset(srcs, vertices, [4]float32{}, indices, blend, dstRegion, srcRegions, shader, uniforms)
+}
+
+// DrawTrianglesWithOffset is DrawTriangles with an offset that is added to the first four elements of each vertex,
+// the destination and the source positions, as the vertices are copied into the command queue.
+// DrawTrianglesWithOffset does not change vertices.
+func (i *Image) DrawTrianglesWithOffset(srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, offset [4]float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32) {
 	for _, src := range srcs {
 		if src == nil {
 			continue
@@ -148,7 +155,7 @@ func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 	}
 	i.flushBufferedWritePixels()
 
-	theCommandQueueManager.enqueueDrawTrianglesCommand(i, srcs, vertices, indices, blend, dstRegion, srcRegions, shader, uniforms)
+	theCommandQueueManager.enqueueDrawTrianglesCommand(i, srcs, vertices, offset, indices, blend, dstRegion, srcRegions, shader, uniforms)
 }
 
 // DrawMesh draws the mesh once for each instance record.

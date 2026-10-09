@@ -450,20 +450,6 @@ func checkSourceDepth(srcs [graphics.ShaderSrcImageCount]*Image, blend graphicsd
 	}
 }
 
-// tmpVertices holds the vertices that drawTriangles moves into the backend, so that the caller's vertices stay as they are.
-// backendsM guards it.
-var tmpVertices []float32
-
-// copyVertices copies vertices into tmpVertices, and returns the copy.
-func copyVertices(vertices []float32) []float32 {
-	if cap(tmpVertices) < len(vertices) {
-		tmpVertices = make([]float32, len(vertices))
-	}
-	vs := tmpVertices[:len(vertices)]
-	copy(vs, vertices)
-	return vs
-}
-
 func (i *Image) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32) {
 	backends := make([]*backend, 0, len(srcs))
 	for _, src := range srcs {
@@ -493,32 +479,15 @@ func (i *Image) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 	// TODO: Check if dstRegion does not to violate the region.
 	dstRegion = dstRegion.Add(r.Min)
 
-	dx, dy := float32(r.Min.X), float32(r.Min.Y)
-
+	// The command queue adds the offsets of the destination and the source as it copies the vertices,
+	// so that the caller's vertices stay as they are.
 	// A shader with its own vertex function adds the origins itself, as its attributes might not be positions.
-	var oxf, oyf float32
-	if shader.ir.UserVertex {
-		// Keep the vertices as they are.
-	} else if srcs[0] != nil {
-		r := srcs[0].regionWithPadding()
-		oxf, oyf = float32(r.Min.X), float32(r.Min.Y)
-		// Adding zero offsets changes no position, so skip the loop.
-		if dx != 0 || dy != 0 || oxf != 0 || oyf != 0 {
-			vertices = copyVertices(vertices)
-			n := len(vertices)
-			for i := 0; i < n; i += graphics.VertexFloatCount {
-				vertices[i] += dx
-				vertices[i+1] += dy
-				vertices[i+2] += oxf
-				vertices[i+3] += oyf
-			}
-		}
-	} else if dx != 0 || dy != 0 {
-		vertices = copyVertices(vertices)
-		n := len(vertices)
-		for i := 0; i < n; i += graphics.VertexFloatCount {
-			vertices[i] += dx
-			vertices[i+1] += dy
+	var offset [4]float32
+	if !shader.ir.UserVertex {
+		offset[0], offset[1] = float32(r.Min.X), float32(r.Min.Y)
+		if srcs[0] != nil {
+			r := srcs[0].regionWithPadding()
+			offset[2], offset[3] = float32(r.Min.X), float32(r.Min.Y)
 		}
 	}
 
@@ -542,7 +511,7 @@ func (i *Image) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 		}
 	}
 
-	i.backend.backendImage.DrawTriangles(imgs, vertices, indices, blend, dstRegion, srcRegions, shader.ensureShader(), uniforms)
+	i.backend.backendImage.DrawTrianglesWithOffset(imgs, vertices, offset, indices, blend, dstRegion, srcRegions, shader.ensureShader(), uniforms)
 }
 
 // NewMesh enqueues the upload of a mesh.
