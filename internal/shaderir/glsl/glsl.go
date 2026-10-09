@@ -66,7 +66,7 @@ func VertexPrelude(version GLSLVersion) string {
 	case GLSLVersionDefault:
 		return `#version 150` + "\n\n" + utilFunctions
 	case GLSLVersionES300:
-		return `#version 300 es`
+		return `#version 300 es` + "\n\nprecision highp sampler2D;"
 	}
 	return ""
 }
@@ -82,6 +82,7 @@ func FragmentPrelude(version GLSLVersion) string {
 	prelude := prefix + `#if defined(GL_ES)
 precision highp float;
 precision highp int;
+precision highp sampler2D;
 #else
 #define lowp
 #define mediump
