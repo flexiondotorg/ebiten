@@ -95,6 +95,9 @@ type Graphics struct {
 	tmpTextures  []mtl.Texture
 	tmpUniforms  []uint32
 
+	// emptyTexture is a transparent 1x1 texture for a source slot without an image.
+	emptyTexture mtl.Texture
+
 	// meshes holds the vertex buffer and the index buffer of each mesh.
 	meshes map[graphicsdriver.MeshID]mesh
 
@@ -771,6 +774,15 @@ func (g *Graphics) beginDraw(dst *Image, srcs [graphics.ShaderSrcImageCount]*Ima
 		var t mtl.Texture
 		switch {
 		case src == nil:
+			// A texture argument that the shader declares needs a binding, or the Metal validation layer reports it.
+			if i >= shader.ir.TextureCount {
+				break
+			}
+			e, err := g.ensureEmptyTexture()
+			if err != nil {
+				return false, err
+			}
+			t = e
 		case !blend.DepthSources[i]:
 			t = src.texture
 		case src == dst:
@@ -1317,6 +1329,31 @@ func (i *Image) ensureDepth() error {
 	// The first depth draw clears the new depth buffer.
 	i.depthFrame = -1
 	return nil
+}
+
+// ensureEmptyTexture returns the empty texture, and makes it at its first use.
+func (g *Graphics) ensureEmptyTexture() (mtl.Texture, error) {
+	if g.emptyTexture != (mtl.Texture{}) {
+		return g.emptyTexture, nil
+	}
+	t, err := g.view.getMTLDevice().NewTextureWithDescriptor(mtl.TextureDescriptor{
+		TextureType: mtl.TextureType2D,
+		PixelFormat: mtl.PixelFormatRGBA8UNorm,
+		Width:       1,
+		Height:      1,
+		StorageMode: storageMode,
+		Usage:       mtl.TextureUsageShaderRead,
+	})
+	if err != nil {
+		return mtl.Texture{}, fmt.Errorf("metal: device.NewTextureWithDescriptor failed: %w", err)
+	}
+	// The contents of a new texture are undefined.
+	if err := t.ReplaceRegion(mtl.Region{Size: mtl.Size{Width: 1, Height: 1, Depth: 1}}, 0, make([]byte, 4), 4); err != nil {
+		t.Release()
+		return mtl.Texture{}, err
+	}
+	g.emptyTexture = t
+	return t, nil
 }
 
 // updateDepthShadow copies the depth buffer into its shadow, when the depth changed since the last copy. Apple documents
