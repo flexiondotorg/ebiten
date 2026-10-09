@@ -116,6 +116,14 @@ func (g *gameForUI) DrawOffscreen() error {
 	return nil
 }
 
+func (g *gameForUI) IsFinalScreenCovered() bool {
+	if _, ok := g.game.(FinalScreenDrawer); !ok {
+		return false
+	}
+	c, ok := g.game.(FinalScreenCoverer)
+	return ok && c.IsFinalScreenCovered()
+}
+
 func (g *gameForUI) DrawFinalScreen(scale, offsetX, offsetY float64) {
 	var geoM GeoM
 	geoM.Scale(scale, scale)

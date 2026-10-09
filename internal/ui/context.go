@@ -40,6 +40,7 @@ type Game interface {
 	UpdateInputState(fn func(*InputState))
 	Update() error
 	DrawOffscreen() error
+	IsFinalScreenCovered() bool
 	DrawFinalScreen(scale, offsetX, offsetY float64)
 }
 
@@ -378,13 +379,17 @@ func (c *context) drawGame(graphicsDriver graphicsdriver.Graphics, ui *UserInter
 		return false, err
 	}
 
-	if c.isOffscreenModified {
+	// A game that covers the final screen draws the frame there, so the frame is drawn even when the
+	// offscreen is not modified.
+	covered := c.game.IsFinalScreenCovered()
+
+	if c.isOffscreenModified || covered {
 		c.offscreenDrawn = true
 	}
 
 	const maxSkipCount = 4
 
-	if !forceDraw && !c.isOffscreenModified {
+	if !forceDraw && !c.isOffscreenModified && !covered {
 		if c.skipCount < maxSkipCount {
 			c.skipCount++
 		}
@@ -410,7 +415,7 @@ func (c *context) drawGame(graphicsDriver graphicsdriver.Graphics, ui *UserInter
 		return false, nil
 	}
 
-	if graphicsDriver.NeedsClearingScreen() {
+	if graphicsDriver.NeedsClearingScreen() && !covered {
 		// This clear is needed for fullscreen mode or some mobile platforms (#622).
 		// An opaque screen is cleared with opaque black: when the screen's framebuffer has an alpha
 		// channel, a compositor would show the desktop through the area the offscreen does not
