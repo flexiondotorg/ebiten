@@ -17,7 +17,6 @@
 package opengl
 
 import (
-	"errors"
 	"unsafe"
 
 	"github.com/hajimehoshi/ebiten/v2/internal/graphics"
@@ -46,18 +45,30 @@ type meshDrawState struct {
 	scissorHeight int
 }
 
-// setDepthTest turns the depth test on or off. Each draw sets it, so that it is off for a draw without depth.
-func (g *Graphics) setDepthTest(on bool) {
-	if g.state.depthTest == on {
-		return
+// setDepthTest turns the depth test on or off, and with it on, the depth write off for readOnly. Each draw sets it, so
+// that it is off for a draw without depth.
+func (g *Graphics) setDepthTest(on, readOnly bool) {
+	if g.state.depthTest != on {
+		if on {
+			g.context.ctx.Enable(gl.DEPTH_TEST)
+			g.context.ctx.DepthFunc(gl.LEQUAL)
+		} else {
+			g.context.ctx.Disable(gl.DEPTH_TEST)
+		}
+		g.state.depthTest = on
 	}
 	if on {
-		g.context.ctx.Enable(gl.DEPTH_TEST)
-		g.context.ctx.DepthFunc(gl.LEQUAL)
-	} else {
-		g.context.ctx.Disable(gl.DEPTH_TEST)
+		g.setDepthMask(!readOnly)
 	}
-	g.state.depthTest = on
+}
+
+// setDepthMask turns the depth write on or off. The depth write also limits glClear and glBlitFramebuffer.
+func (g *Graphics) setDepthMask(write bool) {
+	if g.state.depthReadOnly != write {
+		return
+	}
+	g.context.ctx.DepthMask(write)
+	g.state.depthReadOnly = !write
 }
 
 // endMeshDraws binds the vertex array and the array buffer of the batches again, for DrawTriangles and SetVertices.
@@ -69,6 +80,11 @@ func (g *Graphics) endMeshDraws() {
 	g.context.ctx.BindVertexArray(g.state.vertexArray)
 	g.context.ctx.BindBuffer(gl.ARRAY_BUFFER, uint32(g.state.arrayBuffer))
 	*s = meshDrawState{}
+}
+
+// CanReadDepth implements graphicsdriver.DepthSourcer. Depth textures are core in OpenGL 3.2, OpenGL ES 3.0, and WebGL 2.
+func (g *Graphics) CanReadDepth() bool {
+	return true
 }
 
 func (g *Graphics) CanDrawMesh() bool {
@@ -165,11 +181,11 @@ func (g *Graphics) DrawMesh(dstID graphicsdriver.ImageID, srcIDs [graphics.Shade
 
 	g.beginPass(destination, depth)
 	if depth {
-		if err := destination.useDepth(); err != nil {
+		if err := destination.useDepth(!blend.DepthReadOnly); err != nil {
 			return err
 		}
 	}
-	g.setDepthTest(depth)
+	g.setDepthTest(depth, blend.DepthReadOnly)
 
 	if s.vertexArray == 0 || s.scissorWidth != destination.width || s.scissorHeight != destination.height {
 		g.context.ctx.Scissor(0, 0, int32(destination.width), int32(destination.height))
@@ -186,37 +202,89 @@ func (g *Graphics) DrawMesh(dstID graphicsdriver.ImageID, srcIDs [graphics.Shade
 	return nil
 }
 
-// DiscardDepth invalidates the depth attachment of dst when the context can and dst is still bound.
-func (g *Graphics) DiscardDepth(dstID graphicsdriver.ImageID) {
+// DiscardDepth invalidates the depth attachment of the image on OpenGL ES, and binds the framebuffer of the image
+// first when it is not bound, as after a read of its depth.
+func (g *Graphics) DiscardDepth(id graphicsdriver.ImageID) {
 	c, ok := g.context.ctx.(interface{ InvalidateDepth() })
-	if i := g.images[dstID]; ok && i != nil && i.depthBuffer != 0 && i.framebuffer != nil && g.context.lastFramebuffer == i.framebuffer.native {
+	if i := g.images[id]; ok && g.context.ctx.IsES() && i != nil && i.depthTexture != 0 && i.framebuffer != nil {
+		g.context.bindFramebuffer(i.framebuffer.native)
 		c.InvalidateDepth()
 	}
 }
 
 // useDepth gives the image a depth buffer on its first use, and clears the depth buffer on its first use in a frame.
-// The framebuffer of the image must be bound.
-func (i *Image) useDepth() error {
+// write reports whether the draw writes depth. The framebuffer of the image must be bound.
+func (i *Image) useDepth(write bool) error {
 	c := &i.graphics.context
 	clearDepth := i.depthFrame != i.graphics.frame
-	if i.depthBuffer == 0 {
-		r := c.ctx.CreateRenderbuffer()
-		if r <= 0 {
-			return errors.New("opengl: creating depth renderbuffer failed")
-		}
-		i.depthBuffer = renderbufferNative(r)
-		c.bindRenderbuffer(i.depthBuffer)
+	if i.depthTexture == 0 {
+		// A depth texture, not a renderbuffer, so that a draw can read it with Blend.DepthSources. Making it binds it,
+		// so bind the source of the draw on that unit again.
+		src := c.lastTextures[c.lastActiveTexture]
 		w, h := i.viewportSize()
-		c.ctx.RenderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, int32(w), int32(h))
-		c.ctx.FramebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, uint32(i.depthBuffer))
+		t, err := c.newTextureOfFormat(w, h, gl.DEPTH_COMPONENT24, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT)
+		if err != nil {
+			return err
+		}
+		c.bindTexture(src)
+		i.depthTexture = t
+		c.ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, uint32(t), 0)
 		clearDepth = true
 	}
 	if clearDepth {
-		// The scissor test would clip the clear.
+		// A read-only depth draw turns the depth write off, which would skip the clear, and the scissor test would
+		// clip it.
+		i.graphics.setDepthMask(true)
 		c.ctx.Disable(gl.SCISSOR_TEST)
 		c.ctx.Clear(gl.DEPTH_BUFFER_BIT)
 		c.ctx.Enable(gl.SCISSOR_TEST)
 		i.depthFrame = i.graphics.frame
+		i.depthVersion++
+	}
+	if write {
+		i.depthVersion++
 	}
 	return nil
+}
+
+// useDepthShadow returns the shadow of the depth buffer, and copies the depth buffer into it first when the depth
+// changed since the last copy. A draw cannot read a texture that its framebuffer has attached, so a draw that reads
+// the depth of its own destination reads the shadow. The framebuffer of the image must be bound, and stays bound.
+func (i *Image) useDepthShadow() (textureNative, error) {
+	if i.depthTexture == 0 || i.shadowVersion == i.depthVersion {
+		return i.depthShadow, nil
+	}
+	g := i.graphics
+	c := &g.context
+	if i.depthShadow == 0 {
+		src := c.lastTextures[c.lastActiveTexture]
+		w, h := i.viewportSize()
+		t, err := c.newTextureOfFormat(w, h, gl.DEPTH_COMPONENT24, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT)
+		if err != nil {
+			return 0, err
+		}
+		c.bindTexture(src)
+		i.depthShadow = t
+		// The color texture of the image is the color attachment too, as OpenGL before 4.1 rejects a framebuffer
+		// whose draw buffer has no attachment. The copy writes only the depth.
+		f, err := c.newFramebuffer(i.texture, w, h)
+		if err != nil {
+			return 0, err
+		}
+		i.shadowFramebuffer = f
+		c.ctx.FramebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, uint32(t), 0)
+	}
+	g.endPass()
+	g.setDepthMask(true)
+	w, h := i.viewportSize()
+	c.ctx.BindFramebuffer(gl.READ_FRAMEBUFFER, uint32(i.framebuffer.native))
+	c.ctx.BindFramebuffer(gl.DRAW_FRAMEBUFFER, uint32(i.shadowFramebuffer.native))
+	c.ctx.Disable(gl.SCISSOR_TEST)
+	c.ctx.BlitFramebuffer(0, 0, int32(w), int32(h), 0, 0, int32(w), int32(h), gl.DEPTH_BUFFER_BIT, gl.NEAREST)
+	c.ctx.Enable(gl.SCISSOR_TEST)
+	i.shadowVersion = i.depthVersion
+	// The copy binds the read and draw framebuffers apart.
+	c.lastFramebuffer = invalidFramebuffer
+	c.bindFramebuffer(i.framebuffer.native)
+	return i.depthShadow, nil
 }

@@ -205,7 +205,7 @@ func (b *bufferedImage) DrawMesh(srcs [graphics.ShaderSrcImageCount]*bufferedIma
 		if src == nil {
 			continue
 		}
-		if src == b {
+		if src == b && !blend.IsDepthSelfRead(i, depth) {
 			panic("ebiten: bufferedImage.DrawMesh: source images must be different from the receiver")
 		}
 		src.writeBackPixelsIfNeeded()
