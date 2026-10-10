@@ -18,6 +18,7 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/hajimehoshi/ebiten/v2/internal/cocoa"
 	"github.com/hajimehoshi/ebiten/v2/internal/graphicsdriver/metal/mtl"
 )
 
@@ -244,5 +245,39 @@ func TestRenderPassDescriptorCache(t *testing.T) {
 		if got, want := pixels[i:i+4], []byte{0xff, 0, 0, 0xff}; string(got) != string(want) {
 			t.Fatalf("pixel %d: got %v, want %v", i/4, got, want)
 		}
+	}
+}
+
+// TestGPUTimes checks the GPU start and end times of a completed command buffer, and that reading
+// them does not allocate.
+func TestGPUTimes(t *testing.T) {
+	device, err := mtl.CreateSystemDefaultDevice()
+	if err != nil {
+		t.Skip(err)
+	}
+	cq, err := device.NewCommandQueue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cb, err := cq.CommandBuffer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cb.Retain()
+	defer cb.Release()
+	cb.Commit()
+	cb.WaitUntilCompleted()
+
+	pool := cocoa.NSAutoreleasePool_new()
+	defer pool.Release()
+	start, end := cb.GPUStartTime(), cb.GPUEndTime()
+	if start <= 0 || end < start {
+		t.Errorf("GPU times: got %v to %v, want a positive start and an end at or after it", start, end)
+	}
+	if n := testing.AllocsPerRun(10, func() {
+		cb.GPUStartTime()
+		cb.GPUEndTime()
+	}); n != 0 {
+		t.Errorf("allocations: got %v, want 0", n)
 	}
 }
