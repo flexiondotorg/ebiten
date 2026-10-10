@@ -479,28 +479,13 @@ func (i *Image) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 	// TODO: Check if dstRegion does not to violate the region.
 	dstRegion = dstRegion.Add(r.Min)
 
-	dx, dy := float32(r.Min.X), float32(r.Min.Y)
-
-	var oxf, oyf float32
+	// The command queue adds the offsets of the destination and the source as it copies the vertices,
+	// so that the caller's vertices stay as they are.
+	var offset [4]float32
+	offset[0], offset[1] = float32(r.Min.X), float32(r.Min.Y)
 	if srcs[0] != nil {
 		r := srcs[0].regionWithPadding()
-		oxf, oyf = float32(r.Min.X), float32(r.Min.Y)
-		// Adding zero offsets changes no position, so skip the loop.
-		if dx != 0 || dy != 0 || oxf != 0 || oyf != 0 {
-			n := len(vertices)
-			for i := 0; i < n; i += graphics.VertexFloatCount {
-				vertices[i] += dx
-				vertices[i+1] += dy
-				vertices[i+2] += oxf
-				vertices[i+3] += oyf
-			}
-		}
-	} else if dx != 0 || dy != 0 {
-		n := len(vertices)
-		for i := 0; i < n; i += graphics.VertexFloatCount {
-			vertices[i] += dx
-			vertices[i+1] += dy
-		}
+		offset[2], offset[3] = float32(r.Min.X), float32(r.Min.Y)
 	}
 
 	var imgs [graphics.ShaderSrcImageCount]*graphicscommand.Image
@@ -523,7 +508,7 @@ func (i *Image) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 		}
 	}
 
-	i.backend.backendImage.DrawTriangles(imgs, vertices, indices, blend, dstRegion, srcRegions, shader.ensureShader(), uniforms)
+	i.backend.backendImage.DrawTrianglesWithOffset(imgs, vertices, offset, indices, blend, dstRegion, srcRegions, shader.ensureShader(), uniforms)
 }
 
 // WritePixels replaces the pixels on the image.

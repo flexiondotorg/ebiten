@@ -935,9 +935,8 @@ func (i *Image) DrawTrianglesShader32(vertices []Vertex, indices []uint32, shade
 		blend = options.CompositeMode.blend().internalBlend()
 	}
 
-	vs := i.ensureTmpVertices(len(vertices) * graphics.VertexFloatCount)
-	// Vertex has the same layout as the internal vertex format, so one copy takes all the vertices.
-	copy(vs, unsafe.Slice((*float32)(unsafe.Pointer(unsafe.SliceData(vertices))), len(vertices)*graphics.VertexFloatCount))
+	// Vertex has the same layout as the internal vertex format.
+	vs := unsafe.Slice((*float32)(unsafe.Pointer(unsafe.SliceData(vertices))), len(vertices)*graphics.VertexFloatCount)
 	dox, doy := i.originF32()
 	var sox, soy float32
 	if src := options.Images[0]; src != nil {
@@ -945,6 +944,11 @@ func (i *Image) DrawTrianglesShader32(vertices []Vertex, indices []uint32, shade
 	}
 	// Subtracting a zero origin changes no value, so skip it.
 	if dox != 0 || doy != 0 || sox != 0 || soy != 0 {
+		// The caller's vertices must not change, so the adjustment works on a copy.
+		// Without the adjustment, the layers below copy the vertices before they change them.
+		tmp := i.ensureTmpVertices(len(vs))
+		copy(tmp, vs)
+		vs = tmp
 		for i := 0; i < len(vs); i += graphics.VertexFloatCount {
 			// Create a temporary slice to reduce boundary checks.
 			vs := vs[i : i+4]
