@@ -37,6 +37,18 @@ type compileContext struct {
 	// vertexFuncIndices is the set of the indices of the functions reachable from the vertex entry point.
 	// Metal allows [[front_facing]] only in fragment functions, so these functions do not take front_facing.
 	vertexFuncIndices map[int]struct{}
+
+	// depthTextures has bit i set when texture i has a depth pixel format.
+	depthTextures uint
+}
+
+// textureType returns the type of texture i. Metal requires a depth type for a texture with a depth pixel format, and
+// leaves the green, blue, and alpha of a read of such a texture undefined.
+func (c *compileContext) textureType(i int) string {
+	if c.depthTextures&(1<<i) != 0 {
+		return "depth2d<float>"
+	}
+	return "texture2d<float>"
 }
 
 func (c *compileContext) isVertexFunc(index int) bool {
@@ -98,10 +110,17 @@ const (
 const instanceAttributeIndex = 4
 
 func Compile(p *shaderir.Program) (shader string) {
+	return CompileWithDepthTextures(p, 0)
+}
+
+// CompileWithDepthTextures compiles p as Compile does, and declares texture i as a depth texture for each bit i set in
+// depthTextures. A read of a depth texture returns the depth in red, and 0, 0, and 1 in green, blue, and alpha.
+func CompileWithDepthTextures(p *shaderir.Program, depthTextures uint) (shader string) {
 	c := &compileContext{
 		structNames:        map[string]string{},
 		assignedAttributes: p.AssignedAttributes(),
 		vertexFuncIndices:  map[int]struct{}{},
+		depthTextures:      depthTextures,
 	}
 	if p.VertexFunc.Block != nil {
 		for _, f := range p.ReachableFuncsFromBlock(p.VertexFunc.Block) {
@@ -184,7 +203,7 @@ func Compile(p *shaderir.Program) (shader string) {
 		}
 		for i := 0; i < p.TextureCount; i++ {
 			lines[len(lines)-1] += ","
-			lines = append(lines, fmt.Sprintf("\ttexture2d<float> T%[1]d [[texture(%[1]d)]]", i))
+			lines = append(lines, fmt.Sprintf("\t%[1]s T%[2]d [[texture(%[2]d)]]", c.textureType(i), i))
 		}
 		lines[len(lines)-1] += ") {"
 		lines = append(lines, fmt.Sprintf("\tVaryings %s = {};", vertexOut))
@@ -212,7 +231,7 @@ func Compile(p *shaderir.Program) (shader string) {
 		}
 		for i := 0; i < p.TextureCount; i++ {
 			lines[len(lines)-1] += ","
-			lines = append(lines, fmt.Sprintf("\ttexture2d<float> T%[1]d [[texture(%[1]d)]]", i))
+			lines = append(lines, fmt.Sprintf("\t%[1]s T%[2]d [[texture(%[2]d)]]", c.textureType(i), i))
 		}
 		lines[len(lines)-1] += ","
 		lines = append(lines, "\tbool front_facing [[front_facing]]")
@@ -302,7 +321,7 @@ func (c *compileContext) function(p *shaderir.Program, f *shaderir.Func, prototy
 		args = append(args, "constant Uniforms& uniforms")
 	}
 	for i := 0; i < p.TextureCount; i++ {
-		args = append(args, fmt.Sprintf("texture2d<float> T%d", i))
+		args = append(args, fmt.Sprintf("%s T%d", c.textureType(i), i))
 	}
 	if !c.isVertexFunc(f.Index) {
 		args = append(args, "bool front_facing")
@@ -495,7 +514,11 @@ func (c *compileContext) block(p *shaderir.Program, topBlock, block *shaderir.Bl
 			if callee.Type == shaderir.BuiltinFuncExpr && callee.BuiltinFunc == shaderir.TexelAt {
 				// Floor the position so that a negative position is out of the texture.
 				// Without this, the nearest filter rounds the position to the nearest texel.
-				return fmt.Sprintf("%s.sample(__texelSampler, floor(%s))", args[0], strings.Join(args[1:], ", "))
+				read := fmt.Sprintf("%s.sample(__texelSampler, floor(%s))", args[0], strings.Join(args[1:], ", "))
+				if t := e.Exprs[1]; t.Type == shaderir.TextureVariable && c.depthTextures&(1<<t.Index) != 0 {
+					return fmt.Sprintf("float4(%s, 0.0, 0.0, 1.0)", read)
+				}
+				return read
 			}
 			if callee.Type == shaderir.BuiltinFuncExpr && (callee.BuiltinFunc == shaderir.Min || callee.BuiltinFunc == shaderir.Max) {
 				result := args[0]
