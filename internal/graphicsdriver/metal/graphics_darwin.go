@@ -92,6 +92,9 @@ type Graphics struct {
 	// The cache is accessed on the render thread.
 	readbackBuffers readbackcache.Cache[int, mtl.Buffer]
 
+	// passTimes holds the render passes of the frame that the render-pass log times.
+	passTimes passTimes
+
 	lastDst *Image
 
 	vb mtl.Buffer
@@ -196,10 +199,12 @@ func (g *Graphics) End(mode graphicsdriver.FlushMode) error {
 	g.pool.Release()
 	g.pool.ID = 0
 	if mode != graphicsdriver.FlushModeIntermediate {
-		if _, ok := g.frameToCB[g.frame]; !ok {
+		_, ok := g.frameToCB[g.frame]
+		if !ok {
 			// gcBuffers finishes only a frame with command buffers.
 			g.timings.Finish(g.frame)
 		}
+		g.passTimes.end(g.frame, ok)
 		g.timings.End(g.frame)
 		g.frame++
 		g.view.endFrame()
@@ -284,6 +289,7 @@ loop:
 	}
 	for _, frame := range g.doneFrames {
 		cbs := g.frameToCB[frame]
+		g.passTimes.complete(frame)
 		timed := g.timings.On()
 		for _, cb := range cbs {
 			if timed {
@@ -443,6 +449,10 @@ func (g *Graphics) flushCommandBufferIfNeeded(present bool) {
 
 	if drawableToPresentWithTransaction != (ca.MetalDrawable{}) {
 		g.view.presentDrawableWithTransaction(g.cb, drawableToPresentWithTransaction)
+	}
+
+	if g.passTimes.on {
+		g.waitForCommandBuffers()
 	}
 
 	for _, b := range g.tmpBuffers {
@@ -731,6 +741,11 @@ func (g *Graphics) draw(dst *Image, dstRegions []graphicsdriver.DstRegion, srcs 
 	if g.lastDst != dst {
 		g.flushRenderCommandEncoderIfNeeded()
 	}
+	timePass := g.passTimes.on && g.rce == (mtl.RenderCommandEncoder{})
+	if timePass {
+		// Each timed render pass has its own command buffer.
+		g.flushCommandBufferIfNeeded(false)
+	}
 	g.lastDst = dst
 
 	if g.rce == (mtl.RenderCommandEncoder{}) {
@@ -769,6 +784,9 @@ func (g *Graphics) draw(dst *Image, dstRegions []graphicsdriver.DstRegion, srcs 
 		g.rce = rce
 		g.lastDrawTime = time.Now()
 		g.lastRenderPassTime = g.lastDrawTime
+		if timePass {
+			g.passTimes.add(g.cb, dst)
+		}
 		if g.timings.On() {
 			g.timings.AddPass(g.frame)
 		}
@@ -967,7 +985,12 @@ func (i *Image) Dispose() {
 func (i *Image) WritePixels(args []graphicsdriver.PixelsArgs) error {
 	g := i.graphics
 
-	g.flushRenderCommandEncoderIfNeeded()
+	if g.passTimes.on {
+		// Keep the copy out of the command buffer of a timed render pass.
+		g.flushCommandBufferIfNeeded(false)
+	} else {
+		g.flushRenderCommandEncoderIfNeeded()
+	}
 
 	// Use a temporary buffer to send pixels asynchronously, whichever the memory is shared (e.g., iOS) or
 	// managed (e.g., macOS). Writing the pixels to the existing texture directly with replaceRegion: tries to
