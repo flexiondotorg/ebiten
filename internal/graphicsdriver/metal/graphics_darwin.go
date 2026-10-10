@@ -114,9 +114,11 @@ type Graphics struct {
 	// meshes holds the vertex buffer and the index buffer of each mesh.
 	meshes map[graphicsdriver.MeshID]mesh
 
-	// depthTest and noDepthTest are the depth-stencil states of a draw to a destination with a depth buffer.
-	depthTest   mtl.DepthStencilState
-	noDepthTest mtl.DepthStencilState
+	// depthTest, depthReadOnly, and noDepthTest are the depth-stencil states of a draw to a destination with a depth
+	// buffer. depthReadOnly tests the depth as depthTest does, and writes no depth.
+	depthTest     mtl.DepthStencilState
+	depthReadOnly mtl.DepthStencilState
+	noDepthTest   mtl.DepthStencilState
 
 	// instances places the instance records of the mesh draws of a frame in instanceBuf.
 	instances   instanceSpace
@@ -632,6 +634,15 @@ func (g *Graphics) Initialize() error {
 		return fmt.Errorf("metal: device.NewDepthStencilStateWithDescriptor failed: %w", err)
 	}
 	g.depthTest = depthTest
+	depthReadOnly, err := g.view.getMTLDevice().NewDepthStencilStateWithDescriptor(mtl.DepthStencilDescriptor{
+		DepthCompareFunction: mtl.CompareFunctionLessEqual,
+		BackFaceStencil:      noStencilTest,
+		FrontFaceStencil:     noStencilTest,
+	})
+	if err != nil {
+		return fmt.Errorf("metal: device.NewDepthStencilStateWithDescriptor failed: %w", err)
+	}
+	g.depthReadOnly = depthReadOnly
 	noDepthTest, err := g.view.getMTLDevice().NewDepthStencilStateWithDescriptor(mtl.DepthStencilDescriptor{
 		DepthCompareFunction: mtl.CompareFunctionAlways,
 		BackFaceStencil:      noStencilTest,
@@ -785,6 +796,17 @@ func (g *Graphics) beginDraw(dst *Image, srcs [graphics.ShaderSrcImageCount]*Ima
 		}
 	}
 
+	// A draw that reads the depth of its own destination reads the shadow of the depth buffer, which is copied outside
+	// the render pass.
+	for i, src := range srcs {
+		if src == dst && blend.DepthSources[i] {
+			if err := dst.updateDepthShadow(); err != nil {
+				return false, err
+			}
+			break
+		}
+	}
+
 	// In order to create a separate command buffer for the screen, flush the current command buffer.
 	// This is because a drawable is not released as long as the CommandBuffer referencing it is alive, so
 	// it is more efficient to separate CommandBuffers that use the drawable from those that do not.
@@ -836,6 +858,7 @@ func (g *Graphics) beginDraw(dst *Image, srcs [graphics.ShaderSrcImageCount]*Ima
 			if clearDepth {
 				rpd.DepthAttachment.LoadAction = mtl.LoadActionClear
 				dst.depthFrame = g.frame
+				dst.depthVersion++
 			}
 			rpd.DepthAttachment.StoreAction = mtl.StoreActionStore
 			rpd.DepthAttachment.Texture = dst.depth
@@ -871,9 +894,13 @@ func (g *Graphics) beginDraw(dst *Image, srcs [graphics.ShaderSrcImageCount]*Ima
 	if dst.depth != (mtl.Texture{}) {
 		// Keep the depth values in the range of the depth buffer and its clear value of 1.
 		viewport.ZNear = 0
-		if depth {
+		switch {
+		case depth && blend.DepthReadOnly:
+			g.rce.SetDepthStencilState(g.depthReadOnly)
+		case depth:
 			g.rce.SetDepthStencilState(g.depthTest)
-		} else {
+			dst.depthVersion++
+		default:
 			g.rce.SetDepthStencilState(g.noDepthTest)
 		}
 	}
@@ -893,14 +920,21 @@ func (g *Graphics) beginDraw(dst *Image, srcs [graphics.ShaderSrcImageCount]*Ima
 	}
 
 	for i, src := range srcs {
-		if src != nil {
-			g.rce.SetFragmentTexture(src.texture, i)
-		} else if i < shader.ir.TextureCount {
+		var t mtl.Texture
+		switch {
+		case src == nil:
 			// A texture argument that the shader declares needs a binding, or the Metal validation layer reports it.
-			g.rce.SetFragmentTexture(g.emptyTexture, i)
-		} else {
-			g.rce.SetFragmentTexture(mtl.Texture{}, i)
+			if i < shader.ir.TextureCount {
+				t = g.emptyTexture
+			}
+		case !blend.DepthSources[i]:
+			t = src.texture
+		case src == dst:
+			t = src.depthShadow
+		default:
+			t = src.depth
 		}
+		g.rce.SetFragmentTexture(t, i)
 	}
 
 	rps, err := shader.RenderPipelineState(&g.view, blend, dst.screen, dst.depth != (mtl.Texture{}))
@@ -936,6 +970,11 @@ func (g *Graphics) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphics.
 }
 
 func (g *Graphics) CanDrawMesh() bool {
+	return true
+}
+
+// CanReadDepth implements graphicsdriver.DepthSourcer.
+func (g *Graphics) CanReadDepth() bool {
 	return true
 }
 
@@ -1108,6 +1147,12 @@ type Image struct {
 	// depth is the depth buffer, and depthFrame is the last frame in which the depth buffer was cleared.
 	depth      mtl.Texture
 	depthFrame int64
+
+	// depthVersion counts the changes of the depth buffer. depthShadow is a copy of the depth buffer for the draws that
+	// read the depth of their own destination, and shadowVersion is the depthVersion of the copy.
+	depthVersion  uint64
+	depthShadow   mtl.Texture
+	shadowVersion uint64
 }
 
 func (i *Image) ID() graphicsdriver.ImageID {
@@ -1130,6 +1175,10 @@ func (i *Image) Dispose() {
 	if i.depth != (mtl.Texture{}) {
 		i.depth.Release()
 		i.depth = mtl.Texture{}
+	}
+	if i.depthShadow != (mtl.Texture{}) {
+		i.depthShadow.Release()
+		i.depthShadow = mtl.Texture{}
 	}
 	i.graphics.removeImage(i)
 }
@@ -1377,7 +1426,8 @@ func (i *Image) ensureDepth() error {
 		Width:       w,
 		Height:      h,
 		StorageMode: mtl.StorageModePrivate,
-		Usage:       mtl.TextureUsageRenderTarget,
+		// A draw can read the depth buffer with Blend.DepthSources.
+		Usage: mtl.TextureUsageShaderRead | mtl.TextureUsageRenderTarget,
 	}
 	t, err := i.graphics.view.getMTLDevice().NewTextureWithDescriptor(td)
 	if err != nil {
@@ -1386,5 +1436,48 @@ func (i *Image) ensureDepth() error {
 	i.depth = t
 	// The first depth draw clears the new depth buffer.
 	i.depthFrame = -1
+	return nil
+}
+
+// updateDepthShadow copies the depth buffer into its shadow, when the depth changed since the last copy. Apple documents
+// no way to sample a texture that the render pass has as its depth attachment, and during a render pass, a tile-based
+// GPU keeps the depth in tile memory. So the copy ends the render pass, and a blit copies the stored depth.
+func (i *Image) updateDepthShadow() error {
+	if i.depth == (mtl.Texture{}) || (i.depthShadow != (mtl.Texture{}) && i.shadowVersion == i.depthVersion) {
+		return nil
+	}
+	g := i.graphics
+	if i.depthShadow == (mtl.Texture{}) {
+		w, h := i.internalSize()
+		t, err := g.view.getMTLDevice().NewTextureWithDescriptor(mtl.TextureDescriptor{
+			TextureType: mtl.TextureType2D,
+			PixelFormat: mtl.PixelFormatDepth32Float,
+			Width:       w,
+			Height:      h,
+			StorageMode: mtl.StorageModePrivate,
+			Usage:       mtl.TextureUsageShaderRead,
+		})
+		if err != nil {
+			return fmt.Errorf("metal: device.NewTextureWithDescriptor failed: %w", err)
+		}
+		i.depthShadow = t
+	}
+
+	if g.passTimes.on {
+		// Keep the copy out of the command buffer of a timed render pass.
+		g.flushCommandBufferIfNeeded(false)
+	} else {
+		g.flushRenderCommandEncoderIfNeeded()
+	}
+	if err := g.ensureCommandBuffer(); err != nil {
+		return err
+	}
+	bce, err := g.cb.BlitCommandEncoder()
+	if err != nil {
+		return fmt.Errorf("metal: cb.BlitCommandEncoder failed: %w", err)
+	}
+	bce.CopyFromTexture(i.depth, 0, 0, mtl.Origin{}, mtl.Size{Width: i.width, Height: i.height, Depth: 1}, i.depthShadow, 0, 0, mtl.Origin{})
+	bce.EndEncoding()
+	i.shadowVersion = i.depthVersion
 	return nil
 }

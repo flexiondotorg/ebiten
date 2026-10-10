@@ -39,11 +39,11 @@ type defaultContext struct {
 	gpBindAttribLocation      uintptr
 	gpBindBuffer              uintptr
 	gpBindFramebuffer         uintptr
-	gpBindRenderbuffer        uintptr
 	gpBindTexture             uintptr
 	gpBindVertexArray         uintptr
 	gpBlendEquationSeparate   uintptr
 	gpBlendFuncSeparate       uintptr
+	gpBlitFramebuffer         uintptr
 	gpBufferData              uintptr
 	gpBufferSubData           uintptr
 	gpCheckFramebufferStatus  uintptr
@@ -55,12 +55,12 @@ type defaultContext struct {
 	gpDeleteBuffers           uintptr
 	gpDeleteFramebuffers      uintptr
 	gpDeleteProgram           uintptr
-	gpDeleteRenderbuffers     uintptr
 	gpDeleteShader            uintptr
 	gpDeleteSync              uintptr
 	gpDeleteTextures          uintptr
 	gpDeleteVertexArrays      uintptr
 	gpDepthFunc               uintptr
+	gpDepthMask               uintptr
 	gpDisable                 uintptr
 	gpDrawElements            uintptr
 	gpDrawElementsInstanced   uintptr
@@ -69,11 +69,9 @@ type defaultContext struct {
 	gpFenceSync               uintptr
 	gpFinish                  uintptr
 	gpFlush                   uintptr
-	gpFramebufferRenderbuffer uintptr
 	gpFramebufferTexture2D    uintptr
 	gpGenBuffers              uintptr
 	gpGenFramebuffers         uintptr
-	gpGenRenderbuffers        uintptr
 	gpGenTextures             uintptr
 	gpGenVertexArrays         uintptr
 	gpGetError                uintptr
@@ -90,7 +88,6 @@ type defaultContext struct {
 	gpMapBufferRange      func(target uint32, offset, length int, access uint32) unsafe.Pointer
 	gpPixelStorei         uintptr
 	gpReadPixels          uintptr
-	gpRenderbufferStorage uintptr
 	gpScissor             uintptr
 	gpShaderSource        uintptr
 	gpTexImage2D          uintptr
@@ -218,10 +215,6 @@ func (c *defaultContext) BindFramebuffer(target uint32, framebuffer uint32) {
 	c.call(c.gpBindFramebuffer, uintptr(target), uintptr(framebuffer))
 }
 
-func (c *defaultContext) BindRenderbuffer(target uint32, renderbuffer uint32) {
-	c.call(c.gpBindRenderbuffer, uintptr(target), uintptr(renderbuffer))
-}
-
 func (c *defaultContext) BindTexture(target uint32, texture uint32) {
 	c.call(c.gpBindTexture, uintptr(target), uintptr(texture))
 }
@@ -236,6 +229,10 @@ func (c *defaultContext) BlendEquationSeparate(modeRGB uint32, modeAlpha uint32)
 
 func (c *defaultContext) BlendFuncSeparate(srcRGB uint32, dstRGB uint32, srcAlpha uint32, dstAlpha uint32) {
 	c.call(c.gpBlendFuncSeparate, uintptr(srcRGB), uintptr(dstRGB), uintptr(srcAlpha), uintptr(dstAlpha))
+}
+
+func (c *defaultContext) BlitFramebuffer(srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1 int32, mask uint32, filter uint32) {
+	c.call(c.gpBlitFramebuffer, uintptr(srcX0), uintptr(srcY0), uintptr(srcX1), uintptr(srcY1), uintptr(dstX0), uintptr(dstY0), uintptr(dstX1), uintptr(dstY1), uintptr(mask), uintptr(filter))
 }
 
 func (c *defaultContext) BufferInit(target uint32, size int, usage uint32) {
@@ -284,10 +281,6 @@ func (c *defaultContext) CreateProgram() uint32 {
 	return uint32(ret)
 }
 
-func (c *defaultContext) CreateRenderbuffer() uint32 {
-	return c.genName(c.gpGenRenderbuffers)
-}
-
 func (c *defaultContext) CreateShader(xtype uint32) uint32 {
 	ret, _, _ := c.call(c.gpCreateShader, uintptr(xtype))
 	return uint32(ret)
@@ -317,10 +310,6 @@ func (c *defaultContext) DeleteProgram(program uint32) {
 	c.call(c.gpDeleteProgram, uintptr(program))
 }
 
-func (c *defaultContext) DeleteRenderbuffer(renderbuffer uint32) {
-	c.deleteName(c.gpDeleteRenderbuffers, renderbuffer)
-}
-
 func (c *defaultContext) DeleteShader(shader uint32) {
 	c.call(c.gpDeleteShader, uintptr(shader))
 }
@@ -339,6 +328,10 @@ func (c *defaultContext) DeleteVertexArray(array uint32) {
 
 func (c *defaultContext) DepthFunc(xfunc uint32) {
 	c.call(c.gpDepthFunc, uintptr(xfunc))
+}
+
+func (c *defaultContext) DepthMask(flag bool) {
+	c.call(c.gpDepthMask, uintptr(boolToInt(flag)))
 }
 
 func (c *defaultContext) Disable(cap uint32) {
@@ -372,10 +365,6 @@ func (c *defaultContext) Finish() {
 
 func (c *defaultContext) Flush() {
 	c.call(c.gpFlush)
-}
-
-func (c *defaultContext) FramebufferRenderbuffer(target uint32, attachment uint32, renderbuffertarget uint32, renderbuffer uint32) {
-	c.call(c.gpFramebufferRenderbuffer, uintptr(target), uintptr(attachment), uintptr(renderbuffertarget), uintptr(renderbuffer))
 }
 
 func (c *defaultContext) FramebufferTexture2D(target uint32, attachment uint32, textarget uint32, texture uint32, level int32) {
@@ -477,10 +466,6 @@ func (c *defaultContext) ReadPixels(dst []byte, x int32, y int32, width int32, h
 	c.pinner.Pin(&dst[0])
 	defer c.pinner.Unpin()
 	c.call(c.gpReadPixels, uintptr(x), uintptr(y), uintptr(width), uintptr(height), uintptr(format), uintptr(xtype), uintptr(unsafe.Pointer(&dst[0])))
-}
-
-func (c *defaultContext) RenderbufferStorage(target uint32, internalformat uint32, width int32, height int32) {
-	c.call(c.gpRenderbufferStorage, uintptr(target), uintptr(internalformat), uintptr(width), uintptr(height))
 }
 
 func (c *defaultContext) Scissor(x int32, y int32, width int32, height int32) {
@@ -659,11 +644,11 @@ func (c *defaultContext) LoadFunctions() error {
 	c.gpBindAttribLocation = g.get("glBindAttribLocation")
 	c.gpBindBuffer = g.get("glBindBuffer")
 	c.gpBindFramebuffer = g.get("glBindFramebuffer")
-	c.gpBindRenderbuffer = g.get("glBindRenderbuffer")
 	c.gpBindTexture = g.get("glBindTexture")
 	c.gpBindVertexArray = g.get("glBindVertexArray")
 	c.gpBlendEquationSeparate = g.get("glBlendEquationSeparate")
 	c.gpBlendFuncSeparate = g.get("glBlendFuncSeparate")
+	c.gpBlitFramebuffer = g.get("glBlitFramebuffer")
 	c.gpBufferData = g.get("glBufferData")
 	c.gpBufferSubData = g.get("glBufferSubData")
 	c.gpCheckFramebufferStatus = g.get("glCheckFramebufferStatus")
@@ -675,12 +660,12 @@ func (c *defaultContext) LoadFunctions() error {
 	c.gpDeleteBuffers = g.get("glDeleteBuffers")
 	c.gpDeleteFramebuffers = g.get("glDeleteFramebuffers")
 	c.gpDeleteProgram = g.get("glDeleteProgram")
-	c.gpDeleteRenderbuffers = g.get("glDeleteRenderbuffers")
 	c.gpDeleteShader = g.get("glDeleteShader")
 	c.gpDeleteSync = g.get("glDeleteSync")
 	c.gpDeleteTextures = g.get("glDeleteTextures")
 	c.gpDeleteVertexArrays = g.get("glDeleteVertexArrays")
 	c.gpDepthFunc = g.get("glDepthFunc")
+	c.gpDepthMask = g.get("glDepthMask")
 	c.gpDisable = g.get("glDisable")
 	c.gpDrawElements = g.get("glDrawElements")
 	c.gpEnable = g.get("glEnable")
@@ -688,11 +673,9 @@ func (c *defaultContext) LoadFunctions() error {
 	c.gpFenceSync = g.get("glFenceSync")
 	c.gpFinish = g.get("glFinish")
 	c.gpFlush = g.get("glFlush")
-	c.gpFramebufferRenderbuffer = g.get("glFramebufferRenderbuffer")
 	c.gpFramebufferTexture2D = g.get("glFramebufferTexture2D")
 	c.gpGenBuffers = g.get("glGenBuffers")
 	c.gpGenFramebuffers = g.get("glGenFramebuffers")
-	c.gpGenRenderbuffers = g.get("glGenRenderbuffers")
 	c.gpGenTextures = g.get("glGenTextures")
 	c.gpGenVertexArrays = g.get("glGenVertexArrays")
 	c.gpGetError = g.get("glGetError")
@@ -709,7 +692,6 @@ func (c *defaultContext) LoadFunctions() error {
 	}
 	c.gpPixelStorei = g.get("glPixelStorei")
 	c.gpReadPixels = g.get("glReadPixels")
-	c.gpRenderbufferStorage = g.get("glRenderbufferStorage")
 	c.gpScissor = g.get("glScissor")
 	c.gpShaderSource = g.get("glShaderSource")
 	c.gpTexImage2D = g.get("glTexImage2D")
