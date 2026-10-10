@@ -241,15 +241,44 @@ func (q *commandQueue) EnqueueDrawMeshCommand(dst *Image, srcs [graphics.ShaderS
 	q.commands = append(q.commands, c)
 }
 
-// depthDst returns the destination of a draw with the depth test, or nil.
-func depthDst(c command) *Image {
-	if c, ok := c.(*drawMeshCommand); ok && c.depth {
-		return c.dst
+// depthImages returns the destination of a draw with the depth test, or nil, and each source whose depth the draw
+// reads, or nil. A read of the depth of the destination covers the driver's copy of that depth too.
+func depthImages(c command) (dst *Image, srcs [graphics.ShaderSrcImageCount]*Image) {
+	var blend graphicsdriver.Blend
+	var all [graphics.ShaderSrcImageCount]*Image
+	switch c := c.(type) {
+	case *drawMeshCommand:
+		if c.depth {
+			dst = c.dst
+		}
+		blend, all = c.blend, c.srcs
+	case *drawTrianglesCommand:
+		if c.blend.DepthTest {
+			dst = c.dst
+		}
+		blend, all = c.blend, c.srcs
+	default:
+		return nil, srcs
 	}
-	if c, ok := c.(*drawTrianglesCommand); ok && c.blend.DepthTest {
-		return c.dst
+	for k, on := range blend.DepthSources {
+		if on {
+			srcs[k] = all[k]
+		}
 	}
-	return nil
+	return dst, srcs
+}
+
+// isLastDepthUse reports whether no command of rest draws with the depth test into img or reads the depth of img.
+func isLastDepthUse(img *Image, rest []command) bool {
+	if img == nil {
+		return false
+	}
+	for _, c := range rest {
+		if dst, srcs := depthImages(c); dst == img || slices.Contains(srcs[:], img) {
+			return false
+		}
+	}
+	return true
 }
 
 func (q *commandQueue) lastVertices(n int) []float32 {
@@ -425,10 +454,17 @@ func (q *commandQueue) flush(graphicsDriver graphicsdriver.Graphics, mode graphi
 			if err := c.Exec(q, graphicsDriver, indexOffset); err != nil {
 				return err
 			}
-			// A depth buffer clears at its first use in a frame, so the last flush of a frame discards it after its last draw.
+			// A depth buffer clears at its first use in a frame, so the last flush of a frame discards it after its last
+			// draw or read.
 			if dd, ok := graphicsDriver.(interface{ DiscardDepth(graphicsdriver.ImageID) }); ok && mode != graphicsdriver.FlushModeIntermediate {
-				if dst := depthDst(c); dst != nil && !slices.ContainsFunc(cs[i+1:], func(c command) bool { return depthDst(c) == dst }) {
+				dst, srcs := depthImages(c)
+				if isLastDepthUse(dst, cs[i+1:]) {
 					dd.DiscardDepth(dst.image.ID())
+				}
+				for k, src := range srcs {
+					if src != dst && !slices.Contains(srcs[:k], src) && isLastDepthUse(src, cs[i+1:]) {
+						dd.DiscardDepth(src.image.ID())
+					}
 				}
 			}
 			if debug.IsDebug {

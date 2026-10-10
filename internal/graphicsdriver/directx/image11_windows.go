@@ -38,6 +38,11 @@ type image11 struct {
 	depthTexture     *_ID3D11Texture2D
 	depthStencilView *_ID3D11DepthStencilView
 	depthFrame       int64
+
+	// depthReadOnlyView is a read-only view of the depth buffer, for a draw that tests the depth and reads it too.
+	// depthShaderResourceView reads the depth buffer in a shader.
+	depthReadOnlyView       *_ID3D11DepthStencilView
+	depthShaderResourceView *_ID3D11ShaderResourceView
 }
 
 func (i *image11) internalSize() (int, int) {
@@ -72,6 +77,14 @@ func (i *image11) disposeBuffers() {
 	if i.depthStencilView != nil {
 		i.depthStencilView.Release()
 		i.depthStencilView = nil
+	}
+	if i.depthReadOnlyView != nil {
+		i.depthReadOnlyView.Release()
+		i.depthReadOnlyView = nil
+	}
+	if i.depthShaderResourceView != nil {
+		i.depthShaderResourceView.Release()
+		i.depthShaderResourceView = nil
 	}
 	if i.depthTexture != nil {
 		i.depthTexture.Release()
@@ -171,6 +184,9 @@ func (i *image11) setAsRenderTarget(dsv *_ID3D11DepthStencilView) error {
 }
 
 // ensureDepthStencilView makes the depth buffer of i on its first use. It is untested.
+//
+// The texture is typeless, so that a depth-stencil view writes it as D32_FLOAT and a shader resource view reads it as
+// R32_FLOAT. The depth has no stencil, as no draw uses one.
 func (i *image11) ensureDepthStencilView() (*_ID3D11DepthStencilView, error) {
 	if i.depthStencilView != nil {
 		return i.depthStencilView, nil
@@ -182,15 +198,18 @@ func (i *image11) ensureDepthStencilView() (*_ID3D11DepthStencilView, error) {
 		Height:     uint32(h),
 		MipLevels:  1,
 		ArraySize:  1,
-		Format:     _DXGI_FORMAT_D24_UNORM_S8_UINT,
+		Format:     _DXGI_FORMAT_R32_TYPELESS,
 		SampleDesc: _DXGI_SAMPLE_DESC{Count: 1},
 		Usage:      _D3D11_USAGE_DEFAULT,
-		BindFlags:  uint32(_D3D11_BIND_DEPTH_STENCIL),
+		BindFlags:  uint32(_D3D11_BIND_DEPTH_STENCIL | _D3D11_BIND_SHADER_RESOURCE),
 	}, nil)
 	if err != nil {
 		return nil, err
 	}
-	v, err := i.graphics.device.CreateDepthStencilView(unsafe.Pointer(t), nil)
+	v, err := i.graphics.device.CreateDepthStencilView(unsafe.Pointer(t), &_D3D11_DEPTH_STENCIL_VIEW_DESC{
+		Format:        _DXGI_FORMAT_D32_FLOAT,
+		ViewDimension: _D3D11_DSV_DIMENSION_TEXTURE2D,
+	})
 	if err != nil {
 		t.Release()
 		return nil, err
@@ -198,6 +217,41 @@ func (i *image11) ensureDepthStencilView() (*_ID3D11DepthStencilView, error) {
 	i.depthTexture = t
 	i.depthStencilView = v
 	return v, nil
+}
+
+// ensureDepthReadOnlyView returns the read-only view of the depth buffer, and makes it on its first use. A shader can
+// read the depth buffer while this view is bound. Feature levels 10_0 and 10_1 have no read-only depth-stencil view.
+func (i *image11) ensureDepthReadOnlyView() (*_ID3D11DepthStencilView, error) {
+	if i.depthReadOnlyView != nil {
+		return i.depthReadOnlyView, nil
+	}
+	v, err := i.graphics.device.CreateDepthStencilView(unsafe.Pointer(i.depthTexture), &_D3D11_DEPTH_STENCIL_VIEW_DESC{
+		Format:        _DXGI_FORMAT_D32_FLOAT,
+		ViewDimension: _D3D11_DSV_DIMENSION_TEXTURE2D,
+		Flags:         uint32(_D3D11_DSV_READ_ONLY_DEPTH),
+	})
+	if err != nil {
+		return nil, err
+	}
+	i.depthReadOnlyView = v
+	return v, nil
+}
+
+// getDepthShaderResourceView returns the view that reads the depth buffer in a shader, as (depth, 0, 0, 1), or nil
+// without a depth buffer.
+func (i *image11) getDepthShaderResourceView() (*_ID3D11ShaderResourceView, error) {
+	if i.depthShaderResourceView == nil && i.depthTexture != nil {
+		srv, err := i.graphics.device.CreateShaderResourceView(unsafe.Pointer(i.depthTexture), &_D3D11_SHADER_RESOURCE_VIEW_DESC{
+			Format:        _DXGI_FORMAT_R32_FLOAT,
+			ViewDimension: _D3D11_SRV_DIMENSION_TEXTURE2D,
+			Texture2D:     _D3D11_TEX2D_SRV{MipLevels: 1},
+		})
+		if err != nil {
+			return nil, err
+		}
+		i.depthShaderResourceView = srv
+	}
+	return i.depthShaderResourceView, nil
 }
 
 func (i *image11) getShaderResourceView() (*_ID3D11ShaderResourceView, error) {

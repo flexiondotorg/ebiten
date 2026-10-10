@@ -84,6 +84,11 @@ type MeshDrawer interface {
 	DrawMesh(dst ImageID, srcs [graphics.ShaderSrcImageCount]ImageID, shader ShaderID, mesh MeshID, instances []float32, blend Blend, uniforms []uint32, depth bool) error
 }
 
+// DepthSourcer binds the depth buffer of a source for a draw with Blend.DepthSources. A driver implements it optionally.
+type DepthSourcer interface {
+	CanReadDepth() bool
+}
+
 type Image interface {
 	ID() ImageID
 	Dispose()

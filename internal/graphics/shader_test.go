@@ -114,6 +114,72 @@ func TestCompileShaderUserVertex(t *testing.T) {
 	}
 }
 
+// TestCompileShaderUserVertexClipZ checks that the GLSL of a Vertex function maps clip-space z from 0 to w onto
+// OpenGL's -w to w before each return.
+func TestCompileShaderUserVertexClipZ(t *testing.T) {
+	const src = `//kage:unit pixels
+
+package main
+
+func Vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4) (vec4, vec2, vec4, vec4) {
+	if custom.x > 0 {
+		return vec4(0), srcPos, color, custom
+	}
+	return imageDstProjection() * vec4(dstPos, custom.z, 1), srcPos, color, custom
+}
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+	return color
+}
+`
+	const remap = "gl_Position.z = 2.0*gl_Position.z - gl_Position.w;\n"
+	ir, err := graphics.CompileShader([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, version := range []glsl.GLSLVersion{glsl.GLSLVersionDefault, glsl.GLSLVersionES300} {
+		vs, _ := glsl.Compile(ir, version)
+		if got := strings.Count(vs, remap+"\t\treturn;\n") + strings.Count(vs, remap+"\treturn;\n"); got != 2 || strings.Count(vs, "return;") != 2 {
+			t.Errorf("version %d: the remap must come before each of the 2 returns, but comes before %d:\n%s", version, got, vs)
+		}
+	}
+}
+
+// TestCompileShaderDepthTexturesMSL checks that the MSL of a shader declares each depth texture as depth2d<float>, and
+// that a read of it returns (depth, 0, 0, 1).
+func TestCompileShaderDepthTexturesMSL(t *testing.T) {
+	const src = `//kage:unit pixels
+
+package main
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+	return imageSrc0UnsafeAt(srcPos) + imageSrc1UnsafeAtFromSrc0Pos(srcPos)
+}
+`
+	ir, err := graphics.CompileShader([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m := msl.CompileWithDepthTextures(ir, 1<<1)
+	for _, want := range []string{
+		"\ttexture2d<float> T0 [[texture(0)]],\n\tdepth2d<float> T1 [[texture(1)]],\n\ttexture2d<float> T2 [[texture(2)]]",
+		"texture2d<float> T0, depth2d<float> T1, texture2d<float> T2",
+		"float4(T1.sample(__texelSampler, floor(",
+	} {
+		if !strings.Contains(m, want) {
+			t.Errorf("the MSL must contain %q but does not:\n%s", want, m)
+		}
+	}
+	if strings.Contains(m, "float4(T0.sample") {
+		t.Errorf("the MSL must read T0 as a color texture but does not:\n%s", m)
+	}
+
+	if m := msl.Compile(ir); strings.Contains(m, "depth2d") || strings.Contains(m, "float4(T1.sample") {
+		t.Errorf("the MSL without depth textures must not declare or read a depth texture:\n%s", m)
+	}
+}
+
 func TestCompileShaderUserVertexSignature(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -227,6 +293,9 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
 	}
 	if ir.UserVertex {
 		t.Errorf("ir.UserVertex: got: true, want: false")
+	}
+	if vs, _ := glsl.Compile(ir, glsl.GLSLVersionDefault); strings.Contains(vs, "gl_Position.z") {
+		t.Errorf("the builtin vertex shader must not remap z:\n%s", vs)
 	}
 	// The complete source, and then the program, must be the same as without the support of a Vertex function.
 	if got, want := graphics.CalcSourceID([]byte(src)).String(), "shk6fcj64umurqn4pf3memmoae"; got != want {

@@ -434,6 +434,7 @@ func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 	if len(shader.ir.Attributes) > 4 {
 		panic("atlas: Image.DrawTriangles: a shader with instance attributes can draw only a mesh")
 	}
+	checkSourceDepth(srcs, blend)
 
 	backendsM.Lock()
 	defer backendsM.Unlock()
@@ -455,6 +456,16 @@ func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 	i.drawTriangles(srcs, vertices, indices, blend, dstRegion, srcRegions, shader, uniforms)
 }
 
+// checkSourceDepth panics when a draw reads the depth of a source that is not an unmanaged image.
+// An unmanaged image is never on an atlas, so the depth buffer of its backend is its own.
+func checkSourceDepth(srcs [graphics.ShaderSrcImageCount]*Image, blend graphicsdriver.Blend) {
+	for k, on := range blend.DepthSources {
+		if on && (srcs[k] == nil || srcs[k].imageType != ImageTypeUnmanaged) {
+			panic("atlas: the source of a depth read must be an unmanaged image")
+		}
+	}
+}
+
 func (i *Image) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32) {
 	backends := make([]*backend, 0, len(srcs))
 	for _, src := range srcs {
@@ -472,10 +483,10 @@ func (i *Image) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 
 	i.ensureIsolatedFromSource(backends)
 
-	for _, src := range srcs {
+	for k, src := range srcs {
 		// Compare i and source images after ensuring i is not on an atlas, or
 		// i and a source image might share the same atlas even though i != src.
-		if src != nil && i.backend.backendImage == src.backend.backendImage {
+		if src != nil && i.backend.backendImage == src.backend.backendImage && !blend.IsDepthSelfRead(k, blend.DepthTest) {
 			panic("atlas: Image.DrawTriangles: source must be different from the receiver")
 		}
 	}
@@ -540,6 +551,7 @@ func (i *Image) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Image, mesh *graphi
 	if len(shader.ir.Attributes) != 8 {
 		panic("atlas: Image.DrawMesh: the shader must have a vertex function with instance attributes")
 	}
+	checkSourceDepth(srcs, blend)
 
 	backends := make([]*backend, 0, len(srcs))
 	for _, src := range srcs {
@@ -560,7 +572,7 @@ func (i *Image) DrawMesh(srcs [graphics.ShaderSrcImageCount]*Image, mesh *graphi
 		if src == nil {
 			continue
 		}
-		if i.backend.backendImage == src.backend.backendImage {
+		if i.backend.backendImage == src.backend.backendImage && !blend.IsDepthSelfRead(j, depth) {
 			panic("atlas: Image.DrawMesh: source must be different from the receiver")
 		}
 		if !srcRegions[j].Empty() {

@@ -66,7 +66,7 @@ func VertexPrelude(version GLSLVersion) string {
 	case GLSLVersionDefault:
 		return `#version 150` + "\n\n" + utilFunctions
 	case GLSLVersionES300:
-		return `#version 300 es`
+		return `#version 300 es` + "\n\nprecision highp sampler2D;"
 	}
 	return ""
 }
@@ -82,6 +82,7 @@ func FragmentPrelude(version GLSLVersion) string {
 	prelude := prefix + `#if defined(GL_ES)
 precision highp float;
 precision highp int;
+precision highp sampler2D;
 #else
 #define lowp
 #define mediump
@@ -670,6 +671,11 @@ func (c *compileContext) block(p *shaderir.Program, topBlock, block *shaderir.Bl
 				lines = append(lines, fmt.Sprintf("%sfragColor = %s;", idt, expr(&s.Exprs[0])))
 				// The 'return' statement is not required so far, as the fragment entry point has only one statement. See the adjustProgram implementation.
 			case len(s.Exprs) == 0:
+				// A Vertex function of the source gives clip-space z from 0 to w, as Direct3D and Metal clip it, and
+				// OpenGL clips z from -w to w. Every path of the function ends with a return.
+				if topBlock == p.VertexFunc.Block && p.UserVertex {
+					lines = append(lines, idt+"gl_Position.z = 2.0*gl_Position.z - gl_Position.w;")
+				}
 				lines = append(lines, idt+"return;")
 			default:
 				lines = append(lines, fmt.Sprintf("%sreturn %s;", idt, expr(&s.Exprs[0])))

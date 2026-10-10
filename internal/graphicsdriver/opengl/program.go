@@ -145,8 +145,9 @@ type openGLState struct {
 	// meshDraw is the state that the last mesh draw leaves.
 	meshDraw meshDrawState
 
-	// depthTest is whether the depth test is on.
-	depthTest bool
+	// depthTest is whether the depth test is on, and depthReadOnly is whether the depth write is off.
+	depthTest     bool
+	depthReadOnly bool
 
 	lastProgram  program
 	lastUniforms uniformCache
@@ -279,6 +280,10 @@ func (s *openGLState) reset(context *context) error {
 		context.ctx.Disable(gl.DEPTH_TEST)
 	}
 	s.depthTest = false
+	if s.depthReadOnly {
+		context.ctx.DepthMask(true)
+	}
+	s.depthReadOnly = false
 	s.meshDraw = meshDrawState{}
 
 	return nil

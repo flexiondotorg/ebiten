@@ -26,8 +26,10 @@ const (
 	CONDITION_SATISFIED        = 0x911C
 	DEPTH_ATTACHMENT           = 0x8D00
 	DEPTH_BUFFER_BIT           = 0x0100
+	DEPTH_COMPONENT            = 0x1902
 	DEPTH_COMPONENT24          = 0x81A6
 	DEPTH_TEST                 = 0x0B71
+	DRAW_FRAMEBUFFER           = 0x8CA9
 	DST_ALPHA                  = 0x0304
 	DST_COLOR                  = 0x0306
 	DYNAMIC_DRAW               = 0x88E8
@@ -56,7 +58,7 @@ const (
 	ONE_MINUS_SRC_ALPHA        = 0x0303
 	ONE_MINUS_SRC_COLOR        = 0x0301
 	PIXEL_PACK_BUFFER          = 0x88EB
-	RENDERBUFFER               = 0x8D41
+	READ_FRAMEBUFFER           = 0x8CA8
 	RGBA                       = 0x1908
 	SCISSOR_TEST               = 0x0C11
 	SRC_ALPHA                  = 0x0302

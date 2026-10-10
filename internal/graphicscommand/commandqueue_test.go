@@ -232,3 +232,35 @@ func TestCompleteFramesAfterIntermediateFlushes(t *testing.T) {
 		})
 	}
 }
+
+// TestDepthDiscardAfterRead checks that the depth of an image is discarded after its last depth draw or depth read in
+// any source, whichever comes later. A read of the depth of the destination counts as a read.
+func TestDepthDiscardAfterRead(t *testing.T) {
+	a, b, c, d := &graphicscommand.Image{}, &graphicscommand.Image{}, &graphicscommand.Image{}, &graphicscommand.Image{}
+	cs := []graphicscommand.CommandForTesting{
+		graphicscommand.NewDepthDrawForTesting(a),
+		graphicscommand.NewDepthDrawForTesting(c),
+		graphicscommand.NewDepthReadForTesting(b, a, 2),
+		graphicscommand.NewDepthDrawForTesting(c),
+		graphicscommand.NewDepthDrawForTesting(d),
+		graphicscommand.NewDepthReadForTesting(d, d, 1),
+	}
+	for _, tc := range []struct {
+		name string
+		img  *graphicscommand.Image
+		at   int
+		want bool
+	}{
+		{"a after its last draw", a, 0, false},
+		{"a after its read", a, 2, true},
+		{"c after its first draw", c, 1, false},
+		{"c after its last draw", c, 3, true},
+		{"d after its draw", d, 4, false},
+		{"d after its own read", d, 5, true},
+		{"nil", nil, 3, false},
+	} {
+		if got := graphicscommand.IsLastDepthUseForTesting(tc.img, cs[tc.at+1:]); got != tc.want {
+			t.Errorf("%s: got: %t, want: %t", tc.name, got, tc.want)
+		}
+	}
+}
