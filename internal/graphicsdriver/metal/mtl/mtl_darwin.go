@@ -508,6 +508,8 @@ var (
 	sel_newTextureWithDescriptor                                                                                                                   = objc.RegisterName("newTextureWithDescriptor:")
 	sel_commandBuffer                                                                                                                              = objc.RegisterName("commandBuffer")
 	sel_status                                                                                                                                     = objc.RegisterName("status")
+	sel_GPUStartTime                                                                                                                               = objc.RegisterName("GPUStartTime")
+	sel_GPUEndTime                                                                                                                                 = objc.RegisterName("GPUEndTime")
 	sel_presentDrawable                                                                                                                            = objc.RegisterName("presentDrawable:")
 	sel_commit                                                                                                                                     = objc.RegisterName("commit")
 	sel_waitUntilCompleted                                                                                                                         = objc.RegisterName("waitUntilCompleted")
@@ -832,6 +834,20 @@ func (cb CommandBuffer) Release() {
 // Reference: https://developer.apple.com/documentation/metal/mtlcommandbuffer/1443048-status?language=objc.
 func (cb CommandBuffer) Status() CommandBufferStatus {
 	return CommandBufferStatus(cb.commandBuffer.Send(sel_status))
+}
+
+// GPUStartTime returns the host time in seconds when the GPU starts to run the command buffer.
+//
+// Reference: https://developer.apple.com/documentation/metal/mtlcommandbuffer/gpustarttime?language=objc.
+func (cb CommandBuffer) GPUStartTime() float64 {
+	return objc.Send[float64](cb.commandBuffer, sel_GPUStartTime)
+}
+
+// GPUEndTime returns the host time in seconds when the GPU ends the command buffer.
+//
+// Reference: https://developer.apple.com/documentation/metal/mtlcommandbuffer/gpuendtime?language=objc.
+func (cb CommandBuffer) GPUEndTime() float64 {
+	return objc.Send[float64](cb.commandBuffer, sel_GPUEndTime)
 }
 
 // PresentDrawable registers a drawable presentation to occur as soon as possible.

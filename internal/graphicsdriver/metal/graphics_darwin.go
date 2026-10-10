@@ -73,11 +73,15 @@ type Graphics struct {
 	// unusedBuffers maps a buffer that no frame uses to its length.
 	unusedBuffers map[mtl.Buffer]uintptr
 
-	// freeCBs, freeBuffers, and sortedBuffers keep the slices of the completed frames and the sort
-	// of unusedBuffers, so that a frame does not allocate them.
+	// freeCBs, freeBuffers, sortedBuffers, and doneFrames keep the slices of the completed frames, the
+	// sort of unusedBuffers, and the completed frames in order, so that a frame does not allocate them.
 	freeCBs       [][]mtl.CommandBuffer
 	freeBuffers   [][]pooledBuffer
 	sortedBuffers []pooledBuffer
+	doneFrames    []int64
+
+	// timings holds the GPU timing of the latest frames, see graphicsdriver.FrameTimer.
+	timings graphicsdriver.FrameTimings
 
 	// readbackBuffers are idle shared buffers for pixel read-backs available for reuse.
 	// Only completed read-backs enter this cache; pending read-backs own their buffers.
@@ -172,6 +176,9 @@ func (g *Graphics) Begin() error {
 	// https://developer.apple.com/library/archive/documentation/3DDrawing/Conceptual/MTLBestPracticesGuide/Drawables.html
 	g.pool = cocoa.NSAutoreleasePool_new()
 	g.view.updatePresentationState()
+	if g.timings.On() {
+		g.timings.Begin(g.frame, hostTime())
+	}
 	return nil
 }
 
@@ -185,6 +192,11 @@ func (g *Graphics) End(mode graphicsdriver.FlushMode) error {
 	g.pool.Release()
 	g.pool.ID = 0
 	if mode != graphicsdriver.FlushModeIntermediate {
+		if _, ok := g.frameToCB[g.frame]; !ok {
+			// gcBuffers finishes only a frame with command buffers.
+			g.timings.Finish(g.frame)
+		}
+		g.timings.End(g.frame)
 		g.frame++
 		g.view.endFrame()
 	}
@@ -256,8 +268,22 @@ loop:
 				continue loop
 			}
 		}
+		g.doneFrames = append(g.doneFrames, frame)
+	}
+
+	// The GPU timing takes the command buffers in the order of the queue.
+	slices.Sort(g.doneFrames)
+	for _, frame := range g.doneFrames {
+		cbs := g.frameToCB[frame]
+		timed := g.timings.On()
 		for _, cb := range cbs {
+			if timed {
+				g.timings.AddGPU(frame, cb.GPUStartTime(), cb.GPUEndTime())
+			}
 			cb.Release()
+		}
+		if timed {
+			g.timings.Finish(frame)
 		}
 		delete(g.frameToCB, frame)
 		clear(cbs)
@@ -274,6 +300,7 @@ loop:
 			g.freeBuffers = append(g.freeBuffers, bufs[:0])
 		}
 	}
+	g.doneFrames = g.doneFrames[:0]
 
 	const maxUnusedBuffers = 10
 	if len(g.unusedBuffers) > maxUnusedBuffers {
@@ -298,7 +325,15 @@ func (g *Graphics) ensureCommandBuffer() error {
 	if g.cb != (mtl.CommandBuffer{}) {
 		return nil
 	}
+	// The queue blocks when it holds its most uncompleted command buffers.
+	var t time.Time
+	if timed := g.timings.On(); timed {
+		t = time.Now()
+	}
 	cb, err := g.cq.CommandBuffer()
+	if !t.IsZero() {
+		g.timings.AddQueueWait(g.frame, time.Since(t))
+	}
 	if err != nil {
 		return fmt.Errorf("metal: cq.CommandBuffer failed: %w", err)
 	}
@@ -725,6 +760,9 @@ func (g *Graphics) draw(dst *Image, dstRegions []graphicsdriver.DstRegion, srcs 
 		g.rce = rce
 		g.lastDrawTime = time.Now()
 		g.lastRenderPassTime = g.lastDrawTime
+		if g.timings.On() {
+			g.timings.AddPass(g.frame)
+		}
 	}
 
 	w, h := dst.internalSize()
@@ -1107,6 +1145,13 @@ func uniformAlignment(t shaderir.Type) int {
 		return 4
 	}
 	return 1
+}
+
+var _ graphicsdriver.FrameTimer = (*Graphics)(nil)
+
+// ReadFrameTimings implements graphicsdriver.FrameTimer.
+func (g *Graphics) ReadFrameTimings(dst []graphicsdriver.FrameTiming) (int, int64) {
+	return g.timings.Read(dst)
 }
 
 // ensureEmptyTexture makes the empty texture at its first use.
