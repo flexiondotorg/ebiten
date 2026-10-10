@@ -835,6 +835,36 @@ func (cb CommandBuffer) Status() CommandBufferStatus {
 	return CommandBufferStatus(objcutil.Send(cb.commandBuffer, sel_status))
 }
 
+var (
+	// The keys of the GPU times for key-value coding, which returns a double as an NSNumber.
+	// objcutil.Send cannot return a double, and a function that purego registers allocates at
+	// each call.
+	key_GPUStartTime = cocoa.NSString_alloc().InitWithUTF8String("GPUStartTime")
+	key_GPUEndTime   = cocoa.NSString_alloc().InitWithUTF8String("GPUEndTime")
+)
+
+func valueFloat64(id objc.ID, key cocoa.NSString) float64 {
+	var v float64
+	objcutil.ValueForKey(id, key.ID, unsafe.Pointer(&v), unsafe.Sizeof(v))
+	return v
+}
+
+// GPUStartTime returns the host time in seconds when the GPU starts to run the command buffer.
+// Call it inside an autorelease pool.
+//
+// Reference: https://developer.apple.com/documentation/metal/mtlcommandbuffer/gpustarttime?language=objc.
+func (cb CommandBuffer) GPUStartTime() float64 {
+	return valueFloat64(cb.commandBuffer, key_GPUStartTime)
+}
+
+// GPUEndTime returns the host time in seconds when the GPU ends the command buffer.
+// Call it inside an autorelease pool.
+//
+// Reference: https://developer.apple.com/documentation/metal/mtlcommandbuffer/gpuendtime?language=objc.
+func (cb CommandBuffer) GPUEndTime() float64 {
+	return valueFloat64(cb.commandBuffer, key_GPUEndTime)
+}
+
 // PresentDrawable registers a drawable presentation to occur as soon as possible.
 //
 // Reference: https://developer.apple.com/documentation/metal/mtlcommandbuffer/1443029-presentdrawable?language=objc.
