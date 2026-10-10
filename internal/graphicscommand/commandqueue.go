@@ -305,6 +305,10 @@ func (q *commandQueue) flush(graphicsDriver graphicsdriver.Graphics, mode graphi
 		return nil
 	}
 
+	if passLog != nil {
+		passLog.observe(q.commands, mode, graphicsDriver)
+	}
+
 	es := q.indices
 	vs := q.vertices
 	logger.FrameLogf("Graphics commands:\n")
@@ -649,6 +653,8 @@ func (c *commandQueueManager) finishCommandQueueFlush(queue *commandQueue, mode 
 	}
 	c.queuesInUse = c.queuesInUse[:0]
 	c.pool.put(queue)
+
+	startRequestedPassLog()
 }
 
 func (c *commandQueueManager) enqueueDrawTrianglesCommand(dst *Image, srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, offset [4]float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32) {

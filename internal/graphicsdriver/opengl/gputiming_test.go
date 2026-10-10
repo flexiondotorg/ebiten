@@ -135,11 +135,60 @@ func TestFrameTimings(t *testing.T) {
 	}
 }
 
+func TestPassTimes(t *testing.T) {
+	g, c := newTimedGraphics()
+	a := &Image{id: 1, width: 64, height: 32}
+	b := &Image{id: 2, width: 128, height: 64}
+	var dst [8]graphicsdriver.FrameTiming
+	g.ReadFrameTimings(dst[:])
+	runTimedFrame(g, a, b)
+
+	if !g.TimePasses() {
+		t.Fatal("TimePasses reported false")
+	}
+	runTimedFrame(g, a, b)
+	if _, ok := g.ReadPassTimes(nil); ok {
+		t.Fatal("got the pass times before the GPU finished")
+	}
+	c.finishGPU()
+	times, ok := g.ReadPassTimes(nil)
+	if !ok {
+		t.Fatal("got no pass times after the GPU finished")
+	}
+	// The frame queries of frame 0 are the 1st and the 2nd, and the passes of frame 1 the 3rd to
+	// the 5th.
+	want := []graphicsdriver.PassTime{
+		{Dst: 1, Width: 64, Height: 32, GPU: 3 * time.Millisecond},
+		{Dst: 2, Width: 128, Height: 64, GPU: 4 * time.Millisecond},
+		{Dst: 2, Width: 128, Height: 64, GPU: 5 * time.Millisecond},
+	}
+	if len(times) != len(want) {
+		t.Fatalf("got %+v, want %+v", times, want)
+	}
+	for i := range want {
+		if times[i] != want[i] {
+			t.Errorf("pass %d: got %+v, want %+v", i+1, times[i], want[i])
+		}
+	}
+
+	// The timed frame has no frame query, so it goes out without a GPU time.
+	runTimedFrame(g, a, b)
+	c.finishGPU()
+	runTimedFrame(g, a, b)
+	n, _ := g.ReadFrameTimings(dst[:])
+	if n < 2 || dst[0].Frame != 1 || dst[0].GPU != 0 || dst[0].Passes != 3 || dst[1].Frame != 2 || dst[1].GPU == 0 {
+		t.Errorf("got %+v, want frame 1 without a GPU time and frame 2 with one", dst[:n])
+	}
+}
+
 func TestFrameTimingsWithoutTimerQueries(t *testing.T) {
 	g := &Graphics{}
 	var dst [8]graphicsdriver.FrameTiming
 	if n, frame := g.ReadFrameTimings(dst[:]); n != 0 || frame != -1 {
 		t.Errorf("got %d records and frame %d, want 0 and -1", n, frame)
+	}
+	if g.TimePasses() {
+		t.Error("TimePasses reported true")
 	}
 }
 
