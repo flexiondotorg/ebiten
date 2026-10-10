@@ -582,6 +582,7 @@ var (
 	sel_synchronizeResource                                                                                                                        = objc.RegisterName("synchronizeResource:")
 	sel_copyFromBuffer_sourceOffset_sourceBytesPerRow_sourceBytesPerImage_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin = objc.RegisterName("copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:")
 	sel_copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage = objc.RegisterName("copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toBuffer:destinationOffset:destinationBytesPerRow:destinationBytesPerImage:")
+	sel_copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin              = objc.RegisterName("copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:")
 	sel_newFunctionWithName                                                                                                                        = objc.RegisterName("newFunctionWithName:")
 	sel_getBytes_bytesPerRow_fromRegion_mipmapLevel                                                                                                = objc.RegisterName("getBytes:bytesPerRow:fromRegion:mipmapLevel:")
 	sel_setRenderTargetWidth                                                                                                                       = objc.RegisterName("setRenderTargetWidth:")
@@ -1150,6 +1151,14 @@ func (bce BlitCommandEncoder) CopyFromBuffer(sourceBuffer Buffer, sourceOffset u
 func (bce BlitCommandEncoder) CopyFromTextureToBuffer(sourceTexture Texture, sourceSlice int, sourceLevel int, sourceOrigin Origin, sourceSize Size, destinationBuffer Buffer, destinationOffset uintptr, destinationBytesPerRow uintptr, destinationBytesPerImage uintptr) {
 	bce.commandEncoder.Send(sel_copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage,
 		sourceTexture.texture, sourceSlice, sourceLevel, sourceOrigin, sourceSize, destinationBuffer.buffer, destinationOffset, destinationBytesPerRow, destinationBytesPerImage)
+}
+
+// CopyFromTexture encodes a command that copies image data from a texture’s slice into another slice.
+//
+// Reference: https://developer.apple.com/documentation/metal/mtlblitcommandencoder/1400754-copyfromtexture?language=objc.
+func (bce BlitCommandEncoder) CopyFromTexture(sourceTexture Texture, sourceSlice int, sourceLevel int, sourceOrigin Origin, sourceSize Size, destinationTexture Texture, destinationSlice int, destinationLevel int, destinationOrigin Origin) {
+	bce.commandEncoder.Send(sel_copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin,
+		sourceTexture.texture, sourceSlice, sourceLevel, sourceOrigin, sourceSize, destinationTexture.texture, destinationSlice, destinationLevel, destinationOrigin)
 }
 
 // Library is a collection of compiled graphics or compute functions.

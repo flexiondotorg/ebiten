@@ -33,9 +33,17 @@ type Image struct {
 	height      int
 	screen      bool
 
-	// depthBuffer is the depth buffer, and depthFrame is the frame in which the depth buffer was cleared last.
-	depthBuffer renderbufferNative
-	depthFrame  int64
+	// depthTexture is the depth buffer, and depthFrame is the frame in which the depth buffer was cleared last.
+	depthTexture textureNative
+	depthFrame   int64
+
+	// depthVersion counts the changes of the depth buffer. depthShadow is a copy of the depth buffer for the draws that
+	// read the depth of their own destination, shadowFramebuffer has it as its depth attachment, and shadowVersion is
+	// the depthVersion of the copy.
+	depthVersion      uint64
+	depthShadow       textureNative
+	shadowFramebuffer *framebuffer
+	shadowVersion     uint64
 }
 
 // framebuffer is a wrapper of OpenGL's framebuffer.
@@ -58,9 +66,17 @@ func (i *Image) Dispose() {
 		i.graphics.context.deleteTexture(i.texture)
 		i.texture = 0
 	}
-	if i.depthBuffer != 0 {
-		i.graphics.context.deleteRenderbuffer(i.depthBuffer)
-		i.depthBuffer = 0
+	if i.depthTexture != 0 {
+		i.graphics.context.deleteTexture(i.depthTexture)
+		i.depthTexture = 0
+	}
+	if i.shadowFramebuffer != nil {
+		i.graphics.context.deleteFramebuffer(i.shadowFramebuffer.native)
+		i.shadowFramebuffer = nil
+	}
+	if i.depthShadow != 0 {
+		i.graphics.context.deleteTexture(i.depthShadow)
+		i.depthShadow = 0
 	}
 
 	i.graphics.removeImage(i)
