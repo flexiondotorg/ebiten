@@ -384,6 +384,13 @@ type platformLibraryContextState struct {
 		SwapIntervalEXT         func(display uintptr, drawable _XID, interval int32)
 		SwapIntervalMESA        func(interval int32) int32
 		CreateContextAttribsARB func(display uintptr, config uintptr, share uintptr, direct bool, attribs *int32) uintptr
+
+		// swapBuffers and the swapInterval procs are called in each frame, through swapBuffersGLX
+		// and swapIntervalGLX without allocations.
+		swapBuffers      uintptr
+		swapIntervalSGI  uintptr
+		swapIntervalEXT  uintptr
+		swapIntervalMESA uintptr
 	}
 	egl struct {
 		major, minor int32
@@ -410,9 +417,12 @@ type platformLibraryContextState struct {
 		DestroyContext      func(display uintptr, ctx uintptr) bool
 		CreateWindowSurface func(display uintptr, config uintptr, win _XID, attribList *int32) uintptr
 		MakeCurrent         func(display uintptr, draw uintptr, read uintptr, ctx uintptr) bool
-		SwapBuffers         func(display uintptr, surface uintptr) bool
-		SwapInterval        func(display uintptr, interval int32) bool
 		QueryString         func(display uintptr, name int32) uintptr
 		GetProcAddress      func(procname string) uintptr
+
+		// swapBuffers and swapInterval are called in each frame, through eglSwapBuffers and
+		// eglSwapInterval without allocations.
+		swapBuffers  uintptr
+		swapInterval uintptr
 	}
 }
