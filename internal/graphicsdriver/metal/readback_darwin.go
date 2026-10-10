@@ -62,7 +62,12 @@ func (i *Image) ReadPixelsAsync(args []graphicsdriver.PixelsArgs) (_ graphicsdri
 		return nil, err
 	}
 
-	g.flushRenderCommandEncoderIfNeeded()
+	if g.passTimes.on {
+		// Keep the copy out of the command buffer of a timed render pass.
+		g.flushCommandBufferIfNeeded(false)
+	} else {
+		g.flushRenderCommandEncoderIfNeeded()
+	}
 	if err := g.ensureCommandBuffer(); err != nil {
 		return nil, err
 	}
