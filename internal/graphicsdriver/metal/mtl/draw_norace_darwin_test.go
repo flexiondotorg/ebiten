@@ -20,8 +20,10 @@
 package mtl_test
 
 import (
+	"runtime"
 	"testing"
 
+	"github.com/hajimehoshi/ebiten/v2/internal/cocoa"
 	"github.com/hajimehoshi/ebiten/v2/internal/graphicsdriver/metal/mtl"
 )
 
@@ -78,4 +80,36 @@ func TestRenderPassDescriptorCacheAllocs(t *testing.T) {
 	}
 	cb.Commit()
 	cb.WaitUntilCompleted()
+}
+
+// TestGPUTimesAllocs checks that reading the GPU times of a completed command buffer does not allocate.
+func TestGPUTimesAllocs(t *testing.T) {
+	device, err := mtl.CreateSystemDefaultDevice()
+	if err != nil {
+		t.Skip(err)
+	}
+	cq, err := device.NewCommandQueue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cb, err := cq.CommandBuffer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cb.Retain()
+	defer cb.Release()
+	cb.Commit()
+	cb.WaitUntilCompleted()
+
+	// An autorelease pool belongs to the OS thread that makes it.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	pool := cocoa.NSAutoreleasePool_new()
+	defer pool.Release()
+	if n := testing.AllocsPerRun(10, func() {
+		cb.GPUStartTime()
+		cb.GPUEndTime()
+	}); n != 0 {
+		t.Errorf("allocations: got %v, want 0", n)
+	}
 }
